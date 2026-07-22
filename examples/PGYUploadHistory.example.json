@@ -1,0 +1,12 @@
+[
+    {
+        "version": "",
+        "versionTarget": "",
+        "updateDes": "将 versionTarget 留空 = 跳过本次上传（关闭自动上传）"
+    },
+    {
+        "version": "1.0.0",
+        "versionTarget": "测试版本",
+        "updateDes": "示例：上传到「测试版本」标签"
+    }
+]

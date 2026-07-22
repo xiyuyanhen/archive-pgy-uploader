@@ -1,38 +1,101 @@
-### 3 分钟了解如何进入开发
+# archive-pgy-uploader
 
-欢迎使用云效代码管理 Codeup，通过阅读以下内容，你可以快速熟悉 Codeup ，并立即开始今天的工作。
+通用 **Xcode Archive → 蒲公英（Pgyer）自动上传引擎**。多项目共享同一份脚本，
+各项目只持有自己的配置（密钥 + 是否上传 + 上传包信息）。
 
-### 提交**文件**
+> 本仓库是「共享引擎」，自身**不含任何项目密钥与路径**。
 
-Codeup 支持两种方式进行代码提交：网页端提交，以及本地 Git 客户端提交。
+---
 
-* 如需体验本地命令行操作，请先安装 Git 工具，安装方法参见[安装Git](https://help.aliyun.com/document_detail/153800.html)。
+## 架构：引擎共享 / 配置分离
 
-* 如需体验 SSH 方式克隆和提交代码，请先在平台账号内配置 SSH 公钥，配置方法参见[配置 SSH 密钥](https://help.aliyun.com/document_detail/153709.html)。
+```
+中央仓库  archive-pgy-uploader/          ← 本仓库，多项目共享（git submodule 引用）
+├── pgy_upload.sh              # 引擎：只认 env / --config / --history
+├── examples/
+│   ├── pgy_config.example.sh          # 项目配置模板
+│   └── PGYUploadHistory.example.json  # 控制文件模板
+├── .gitignore
+└── README.md
 
-* 如需体验 HTTP 方式克隆和提交代码，请先在平台账号内配置克隆账密，配置方法参见[配置 HTTPS 克隆账号密码](https://help.aliyun.com/document_detail/153710.html)。
+每个项目（如 xiyuScoreboard）：
+├── ios/Scripts/archive-pgy-uploader/  → git submodule → 本仓库
+├── ios/Scripts/archive-pgy-config/
+│   ├── pgy_config.sh          # 真实密钥（gitignore，不入库）
+│   └── PGYUploadHistory.json  # 控制文件：是否触发 + 上传包信息
+└── Runner.xcodeproj/project.pbxproj   # Run Script
+```
 
-现在，你可以在 Codeup 中提交代码文件了，跟着文档「[__提交第一行代码__](https://help.aliyun.com/document_detail/153707.html?spm=a2c4g.153710.0.0.3c213774PFSMIV#6a5dbb1063ai5)」一起操作试试看吧。
+**Run Script（Archive 后执行）**：
 
-<img src="https://img.alicdn.com/imgextra/i3/O1CN013zHrNR1oXgGu8ccvY_!!6000000005235-0-tps-2866-1268.jpg" width="100%" />
+```bash
+bash "${SRCROOT}/Scripts/archive-pgy-uploader/pgy_upload.sh" \
+  --config "${SRCROOT}/Scripts/archive-pgy-config/pgy_config.sh" \
+  --archive "$ARCHIVE_PATH"
+```
 
+引擎读取 `--config` 指定的项目配置 → 拿到密钥与 `PGY_HISTORY_FILE` → 再从控制文件
+决定**跳过/上传**、**版本号 / 版本目标 / 更新说明**。
 
-### 进行代码检测
+---
 
-开发过程中，为了更好的维护你的代码质量，你可以开启 Codeup 内置开箱即用的「[代码检测服务](https://help.aliyun.com/document_detail/434321.html)」，开启后提交或合并请求的变更将自动触发检测，识别代码编写规范和安全漏洞问题，并及时提供结果报表和修复建议。
+## 三种运行模式
 
-<img src="https://img.alicdn.com/imgextra/i2/O1CN01BRzI1I1IO0CR2i4Aw_!!6000000000882-0-tps-2862-1362.jpg" width="100%" />
+| 模式 | 调用 | 说明 |
+|---|---|---|
+| 直接（推荐，Archive 后） | `--archive "$ARCHIVE_PATH"` | 同步执行导出+上传，监控页随进度刷新 |
+| 等待（Build Phase 前置） | 不传 `--archive` | 后台轮询最新 `.xcarchive` 再处理 |
+| 手动 / CI | `--archive xxx.ipa --version 1.2.3 --notes "..."` | 直接对已有包上传 |
 
-### 开展代码评审
+---
 
-功能开发完毕后，通常你需要发起「[代码评审并执行合并](https://help.aliyun.com/document_detail/153872.html)」，Codeup 支持多人协作的代码评审服务，你可以通过「[保护分支设置合并规则](https://help.aliyun.com/document_detail/153873.html?spm=a2c4g.203108.0.0.430765d1l9tTRR#p-4on-aep-l5q)」策略及「[__合并请求设置__](https://help.aliyun.com/document_detail/153874.html?spm=a2c4g.153871.0.0.3d38686cJpcdJI)」对合并过程进行流程化管控，同时提供在线代码评审及冲突解决能力，让评审过程更加流畅。
+## 控制文件 `PGYUploadHistory.json`
 
-<img src="https://img.alicdn.com/imgextra/i1/O1CN01MaBDFH1WWcGnQqMHy_!!6000000002796-0-tps-2592-1336.jpg" width="100%" />
+数组 `.[0]` 为「当前生效」条目（其余作手工人账本）：
 
-### 成员协作
+```json
+[
+  { "version": "1.0.3.0", "versionTarget": "测试版本", "updateDes": "环境噪音监测功能" }
+]
+```
 
-是时候邀请成员一起编写卓越的代码工程了，请点击左下角「成员」邀请你的小伙伴开始协作吧！
+- `versionTarget` **为空** → 跳过本次上传（最核心的「是否上传」开关）
+- `version` / `updateDes` → 仅在对应变量未被 CLI/config 赋值时作为默认值
+- 优先级：`--version/--notes/--target` > `pgy_config.sh`/环境变量 > 控制文件 > `Info.plist` 自动探测
 
-### 更多
+---
 
-Git 使用教学、高级功能指引等更多说明，参见[Codeup帮助文档](https://help.aliyun.com/document_detail/153402.html)。
+## 项目接入步骤
+
+1. 在项目中添加 submodule：
+   ```bash
+   git submodule add <本仓库 remote> ios/Scripts/archive-pgy-uploader
+   ```
+2. 建项目配置目录 `ios/Scripts/archive-pgy-config/`：
+   - `cp examples/pgy_config.example.sh pgy_config.sh` 并填入真实密钥
+   - 放置 `PGYUploadHistory.json`（可参考 `examples/PGYUploadHistory.example.json`）
+   - 项目 `.gitignore` 加入 `ios/Scripts/archive-pgy-config/pgy_config.sh`
+3. 在 Archive 的 Run Script（勾选 "Run script only when installing"）填入上方命令。
+4. `plutil -lint` 校验 pbxproj，Clean → Archive 实机验证一次。
+
+---
+
+## 配置项
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `PGY_USER_KEY` / `PGY_API_KEY` | — | 蒲公英凭证（必填，来自 pgy_config.sh 或 env） |
+| `PGY_HISTORY_FILE` | — | 控制文件路径（由 pgy_config.sh 设置） |
+| `PGY_TEAM_ID` | `$DEVELOPMENT_TEAM` | 签名 team，可用此变量显式覆盖 |
+| `PGY_METHOD` | `development` | development / ad-hoc / app-store |
+| `PGY_MAX_WAIT` | `300` | 等待模式最长秒数 |
+| `PGY_DEBUG_CHECK` | `auto` | auto / on / off（仅 Flutter 拦截 Debug） |
+| `PGY_VERSION_TARGET` | — | 版本目标标签 |
+| `PGY_UPDATE_DESCRIPTION` | — | 默认更新说明 |
+
+---
+
+## 实时状态页
+
+自动打开一个本地 HTML 监控页（`<meta refresh>` 自刷新，成功/失败转静态结果页），
+无需 HTTP 服务、无 CORS 问题。
