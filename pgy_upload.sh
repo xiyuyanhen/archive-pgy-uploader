@@ -179,6 +179,7 @@ ENDWAIT
 <div class="info-grid">
   <div class="info-item"><span class="label">版本号</span><span class="value">$FINAL_VERSION</span></div>
   <div class="info-item"><span class="label">版本目标</span><span class="value">$PGY_VERSION_TARGET</span></div>
+  <div class="info-item"><span class="label">描述</span><span class="value">$UPDATE_DESCRIPTION</span></div>
 </div>
 <p class="hint">💡 此步骤通常需要 1-2 分钟，请耐心等待</p>
 ENDEXP
@@ -203,10 +204,10 @@ ENDUP
             body_content=$(cat <<ENDOK
 <div class="stage-title success-title">✅ 上传成功</div>
 <img class="qr-img" src="data:image/png;base64,$QR_B64" alt="扫码下载"/>
-<div class="result-info">
-  <div class="result-row"><b>版本号：</b>$FINAL_VERSION</div>
-  <div class="result-row"><b>版本目标：</b>$PGY_VERSION_TARGET</div>
-  <div class="result-row"><b>更新描述：</b>$UPDATE_DESCRIPTION</div>
+<div class="info-grid">
+  <div class="info-item"><span class="label">版本号</span><span class="value">$FINAL_VERSION</span></div>
+  <div class="info-item"><span class="label">版本目标</span><span class="value">$PGY_VERSION_TARGET</span></div>
+  <div class="info-item"><span class="label">更新描述</span><span class="value">$UPDATE_DESCRIPTION</span></div>
 </div>
 <a class="download-link" id="dl" href="https://www.pgyer.com/$DOWNLOAD_URL" target="_blank">https://www.pgyer.com/$DOWNLOAD_URL</a>
 <button class="copy-btn" onclick="doCopy()">复制下载链接</button>
@@ -260,9 +261,6 @@ body{background:#1a1a1a;color:#e0e0e0;font-family:-apple-system,BlinkMacSystemFo
 .hint{font-size:12px;color:#555;margin-top:16px}
 .success-title{color:#4caf50!important;font-size:24px;margin-bottom:24px}
 .qr-img{width:220px;height:220px;border-radius:14px;margin:20px auto;background:#fff;padding:10px;display:block}
-.result-info{text-align:left;margin:20px 0}
-.result-row{font-size:14px;color:#bbb;line-height:1.8}
-.result-row b{color:#ddd}
 .download-link{display:block;word-break:break-all;color:#64b5f6;font-size:13px;margin:18px 0 14px;text-decoration:none}
 .download-link:hover{text-decoration:underline}
 .copy-btn{display:inline-block;padding:12px 28px;border-radius:10px;font-size:15px;font-weight:600;background:#4caf50;color:#fff;border:none;cursor:pointer;transition:background .2s}
@@ -435,7 +433,7 @@ EOF
         -F "uKey=$PGY_USER_KEY" \
         -F "_api_key=$PGY_API_KEY" \
         -F "updateDescription=$PGY_UPDATE_DESCRIPTION" \
-        -F "buildUpdateDescription=$PGY_VERSION_TARGET" \
+        -F "buildUpdateDescription=$PGY_UPDATE_DESCRIPTION" \
         -F "buildVersion=$FINAL_VERSION" \
         https://www.pgyer.com/apiv2/app/upload 2>>"$LOG_FILE")
 
