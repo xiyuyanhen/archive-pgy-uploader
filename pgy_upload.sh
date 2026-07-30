@@ -3,12 +3,11 @@
 # pgy_upload.sh — 通用 Xcode Archive → 蒲公英 自动上传工具
 # 适用：任意 iOS 项目（原生 / Flutter / RN / Unity），只要产出 .xcarchive
 #
-# 两种运行模式：
-#   方式 A（推荐，Xcode Build Phase）：
-#     把本脚本加到 Archive 用的 Run Script（勾选 "Run script only when installing"），
-#     不传 --archive，脚本自动进入「等待模式」轮询最新的 .xcarchive。
-#
-#   方式 B（手动 / Post-Archive / CI）：
+# 运行模式：
+#   Xcode Run Script（runOnlyForDeploymentPostprocessing=1）：
+#     脚本在 Archive 完成后自动执行。如果 $ARCHIVE_PATH 可用则直接处理；
+#     否则采用多策略自动发现已创建的 .xcarchive。
+#   手动 / CI：
 #     pgy_upload.sh --archive /path/to/xxx.xcarchive
 #     pgy_upload.sh --archive /path/to/xxx.ipa --version 1.2.3 --notes "修复BUG"
 #
@@ -45,10 +44,11 @@ FINAL_VERSION=""; PGY_CLEANUP=""
 SKIP_UPLOAD=0
 
 # ============ 日志 ============
+# 注意：echo 到 stderr（>&2），避免在 $(...) 捕获时污染函数返回值
 log() {
     local msg="[$(date '+%Y-%m-%d %H:%M:%S')] [$1] $2"
     echo "$msg" >> "$LOG_FILE"
-    echo "$msg"
+    echo "$msg" >&2
 }
 
 # ============ 命令行参数 ============
@@ -60,7 +60,7 @@ while [[ $# -gt 0 ]]; do
         --notes)   PGY_UPDATE_DESCRIPTION="$2"; shift 2;;
         --target)  PGY_VERSION_TARGET="$2"; shift 2;;
         --method)  PGY_METHOD="$2"; shift 2;;
-        --_wait)   break;;   # 交给文件末尾的 --_wait 处理块（此时所有函数已定义）
+        --_wait)   break;;   # 历史兼容：旧版后台轮询入口，现已弃用（改为主进程内同步重试）
         --config)  CONFIG_FILE="$2"; shift 2;;
         --history) PGY_HISTORY_FILE="$2"; shift 2;;
         -h|--help) awk 'NR==1 && /^#!\//{next} /^#/{sub(/^#\ ?/,""); print; next} {exit}' "$0"; exit 0;;
@@ -90,10 +90,6 @@ if ! command -v jq &> /dev/null; then
 fi
 
 # ============ 读取 PGYUploadHistory.json（可选的项目级控制文件） ============
-# 兼容项目内 PGYUploadScript.sh 的格式：.[0].versionTarget / .[0].version / .[0].updateDes
-#   - 文件不存在 → 不生效，退回到 config/env/auto 探测
-#   - versionTarget 为空/null → 跳过本次上传（最核心的「是否上传」开关）
-#   - version / updateDes → 仅在对应变量尚未被 CLI / config 赋值时作为默认值
 load_history() {
     [ -f "$PGY_HISTORY_FILE" ] || { log INFO "未找到 PGYUploadHistory.json（可选控制文件），跳过历史控制"; return 0; }
     if ! jq empty "$PGY_HISTORY_FILE" 2>/dev/null; then
@@ -114,8 +110,6 @@ load_history() {
     [ -z "$PGY_UPDATE_DESCRIPTION" ] && PGY_UPDATE_DESCRIPTION="$des"
 }
 # ============ 上传前准备：读取控制文件 + 校验凭证 ============
-# 抽成函数，供「直接模式主流程」与「等待模式子进程」在配置就绪后各自调用，
-# 避免等待模式下后台进程在 load_config 之前就被凭证校验拦截。
 prepare_upload() {
     load_history
     if [ "$SKIP_UPLOAD" = "1" ]; then
@@ -432,79 +426,112 @@ EOF
     fi
 }
 
-# ============ 等待模式：轮询最新归档 ============
-wait_for_archive() {
-    STAGE="waiting"; STAGE_ICON="⏳"; STAGE_TITLE="等待 Xcode Archive 完成"
-    STAGE_DETAIL="正在检测归档文件..."; render_monitor
+# ═══════════════════════════════════════════════════════════════
+#  多策略归档查找器
+# ═══════════════════════════════════════════════════════════════
+#
+# 关键时序事实：
+#   runOnlyForDeploymentPostprocessing=1 意味着本脚本在 Archive **完成后**才执行。
+#   .xcarchive 已经存在于磁盘上。我们不需要"等待模式"——需要的是可靠地找到它。
+#
+# Xcode 不保证设置 $ARCHIVE_PATH（尤其 Flutter 项目），且 Run Script 的 sandbox 可能
+# 限制 find 的文件系统访问。因此采用多策略回退查找。
+#
+PGY_ARCHIVE_GRACE="${PGY_ARCHIVE_GRACE:-1800}"
+ARCHIVE_DIR="${HOME:-/Users/zuzhuli}/Library/Developer/Xcode/Archives"
 
-    local ts_file; ts_file=$(mktemp)
-    date +%s > "$ts_file"
-    local found="" elapsed=0
+find_xcarchive() {
+    local cand=""
+    log INFO "[查找] ARCHIVE_DIR='$ARCHIVE_DIR' HOME='$HOME' grace=${PGY_ARCHIVE_GRACE}s"
 
-    while [ $elapsed -lt $PGY_MAX_WAIT ]; do
-        local cand
-        cand=$(find ~/Library/Developer/Xcode/Archives \
-            -name "*.xcarchive" -type d -newer "$ts_file" 2>/dev/null | sort | tail -1)
-        if [ -n "$cand" ] && [ -d "$cand" ] && [ -d "$cand/Products/Applications" ]; then
-            local cnt
-            cnt=$(find "$cand/Products/Applications" -name "*.app" -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')
-            if [ "$cnt" -ge 1 ]; then found="$cand"; break; fi
-        fi
-        sleep 3
-        elapsed=$((elapsed + 3))
-        STAGE_DETAIL="已等待 ${elapsed} 秒（最多 ${PGY_MAX_WAIT} 秒）..."; render_monitor
-    done
-    rm -f "$ts_file"
-
-    if [ -z "$found" ]; then
-        STAGE="error"
-        ERROR_MSG="等待超时（${PGY_MAX_WAIT} 秒），未检测到新的 Xcode Archive。<br>请确认 Product → Archive 是否正常执行。"
-        render_monitor; log ERROR "等待超时"; exit 1
+    # ── 策略 1：find -mmin（时间窗口内）──
+    if [ -d "$ARCHIVE_DIR" ]; then
+        cand=$(find "$ARCHIVE_DIR" \
+            -name "*.xcarchive" -type d -mmin "-$((PGY_ARCHIVE_GRACE / 60))" 2>/dev/null \
+            | sort | tail -1) || true
     fi
-    log INFO "检测到新 Archive: $found"
-    process_archive "$found"
-}
+    log INFO "[查找] 策略1(find -mmin): cand='${cand:-<无>}'"
 
-# ============================================================
-# 等待模式子进程（位于所有函数定义之后，函数均已就绪）：
-#   pgy_upload.sh --_wait <log> <html> <maxwait> <config> <ver> <target> <notes> <method>
-# ============================================================
-if [ "${1:-}" = "--_wait" ]; then
-    LOG_FILE="$2"; MONITOR_HTML="$3"
-    [ -n "$4" ] && PGY_MAX_WAIT="$4"
-    CONFIG_FILE="$5"
-    [ -n "$6" ] && PGY_VERSION_OVERRIDE="$6"
-    [ -n "$7" ] && PGY_VERSION_TARGET="$7"
-    [ -n "$8" ] && PGY_UPDATE_DESCRIPTION="$8"
-    [ -n "$9" ] && PGY_METHOD="$9"
-    load_config
-    prepare_upload
-    wait_for_archive
-    exit 0
-fi
+    # ── 策略 2：ls -1t 取最新（不限时间，覆盖 find 被沙箱限制）──
+    if [ -z "$cand" ] && [ -d "$ARCHIVE_DIR" ]; then
+        # Xcode archive 按日期组织：YYYY-MM-DD/name.xcarchive
+        cand=$(ls -1dt "$ARCHIVE_DIR"/*/*.xcarchive 2>/dev/null | head -1) || true
+    fi
+    log INFO "[查找] 策略2(ls -1t): cand='${cand:-<无>}'"
+
+    # ── 策略 3：glob 当日目录──
+    if [ -z "$cand" ] && [ -d "$ARCHIVE_DIR" ]; then
+        local today_dir
+        today_dir=$(date +%Y-%m-%d)
+        if [ -d "$ARCHIVE_DIR/$today_dir" ]; then
+            cand=$(ls -1dt "$ARCHIVE_DIR/$today_dir"/*.xcarchive 2>/dev/null | head -1) || true
+        fi
+    fi
+    log INFO "[查找] 策略3(当日目录): cand='${cand:-<无>}'"
+
+    # ── 验证候选结果（用 glob 而非 find：find 在 Xcode sandbox 下可能被限制）──
+    if [ -n "$cand" ] && [ -d "$cand" ]; then
+        if [ -d "$cand/Products/Applications" ]; then
+            local app_count=0
+            shopt -s nullglob
+            local apps=("$cand/Products/Applications"/*.app)
+            app_count=${#apps[@]}
+            shopt -u nullglob
+            if [ "$app_count" -ge 1 ]; then
+                echo "$cand"
+                return 0
+            fi
+            log INFO "[查找] 候选存在但 Products/Applications 无 .app（app_count=$app_count），跳过"
+        else
+            log INFO "[查找] 候选缺少 Products/Applications: '$cand'"
+        fi
+    elif [ -n "$cand" ]; then
+        log INFO "[查找] 候选路径无效: '$cand'"
+    fi
+
+    return 0
+}
 
 # ============ 主入口 ============
 ARCHIVE_INPUT=""
-if [ -n "$ARCHIVE_ARG" ]; then
+if [ -n "$ARCHIVE_ARG" ] && [ -e "$ARCHIVE_ARG" ]; then
+    # --archive 传了有效路径 → 直接模式
     ARCHIVE_INPUT="$ARCHIVE_ARG"
 elif [ -n "$ARCHIVE_PATH" ] && [ -e "$ARCHIVE_PATH" ]; then
+    # 环境变量 $ARCHIVE_PATH 有效 → 直接模式
     ARCHIVE_INPUT="$ARCHIVE_PATH"
 fi
 
+# runOnlyForDeploymentPostprocessing=1 → 本脚本在 Archive 完成后才执行。
+# 因此 .xcarchive 通常已存在：先多策略直接发现；失败则主进程内短轮询重试（兜底 IO 延迟）。
+# 不再使用后台 nohup --_wait 子进程（旧实现缺失对应处理块，会递归 fork 且永不推进），
+# 超时即给出明确错误，而不是永久卡在「等待 Xcode Archive 完成」页。
+if [ -z "$ARCHIVE_INPUT" ]; then
+    log INFO "未收到有效的 archive 路径（--archive='${ARCHIVE_ARG:-<未传>}' ARCHIVE_PATH='${ARCHIVE_PATH:-<未设置>}'），启动多策略查找..."
+    ARCHIVE_INPUT=$(find_xcarchive) || true
+    waited=0
+    while [ -z "$ARCHIVE_INPUT" ] && [ "$waited" -lt "$PGY_MAX_WAIT" ]; do
+        sleep 5
+        waited=$((waited + 5))
+        log INFO "轮询重试发现归档（已等待 ${waited}s / ${PGY_MAX_WAIT}s）..."
+        ARCHIVE_INPUT=$(find_xcarchive) || true
+    done
+fi
+
 if [ -n "$ARCHIVE_INPUT" ]; then
-    # 直接模式：Archive 已完成，同步执行
+    # 归档已找到，同步执行完整流程（导出 + 上传）
+    log INFO "使用 archive: $ARCHIVE_INPUT"
     STAGE="waiting"; STAGE_ICON="⏳"; STAGE_TITLE="准备上传"; STAGE_DETAIL="初始化..."
     render_monitor
     open "$MONITOR_HTML" 2>/dev/null || true
     prepare_upload
     process_archive "$ARCHIVE_INPUT"
 else
-    # 等待模式：打开监控页 + 后台轮询（不阻塞 Xcode Archive）
-    STAGE="waiting"; STAGE_ICON="⏳"; STAGE_TITLE="等待 Xcode Archive 完成"; STAGE_DETAIL="正在初始化..."
+    # 所有策略 + 重试均未找到 → 明确报错，避免永久卡在「等待」页
+    log ERROR "在 ${PGY_MAX_WAIT}s 内未能通过任何策略找到 .xcarchive（ARCHIVE_DIR='$ARCHIVE_DIR'）。请确认 Xcode 已成功 Archive，或手动指定 --archive 路径。"
+    STAGE="error"; STAGE_ICON="❌"; STAGE_TITLE="未找到归档"
+    STAGE_DETAIL="在 ${PGY_MAX_WAIT}s 内未能发现 .xcarchive。<br>请确认 Xcode 已成功 Archive，或在 Run Script 中显式传入 --archive 路径。<br><small>ARCHIVE_DIR=$ARCHIVE_DIR</small>"
     render_monitor
-    nohup "$0" --_wait "$LOG_FILE" "$MONITOR_HTML" "$PGY_MAX_WAIT" "${CONFIG_FILE:-}" "$PGY_VERSION_OVERRIDE" "$PGY_VERSION_TARGET" "$PGY_UPDATE_DESCRIPTION" "$PGY_METHOD" >/dev/null 2>&1 &
-    for _ in $(seq 1 10); do [ -f "$MONITOR_HTML" ] && break; sleep 0.3; done
     open "$MONITOR_HTML" 2>/dev/null || true
-    log INFO "已进入等待模式，监控页已打开"
-    exit 0
+    exit 1
 fi
