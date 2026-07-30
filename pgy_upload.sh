@@ -323,6 +323,12 @@ process_archive() {
         render_monitor; log ERROR "版本号获取失败"; exit 1
     fi
 
+    # 构造更新描述：$version $versionTarget $updateDes
+    local raw_des="$PGY_UPDATE_DESCRIPTION"
+    PGY_UPDATE_DESCRIPTION="${FINAL_VERSION}${PGY_VERSION_TARGET:+ $PGY_VERSION_TARGET}${raw_des:+ $raw_des}"
+    UPDATE_DESCRIPTION="$PGY_UPDATE_DESCRIPTION"
+    log INFO "更新描述: '$UPDATE_DESCRIPTION'"
+
     # Debug 拦截（仅 Flutter）
     if [ -n "$app_dir" ] && ! check_debug "$app_dir"; then
         STAGE="error"
