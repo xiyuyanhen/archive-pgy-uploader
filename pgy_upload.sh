@@ -42,6 +42,7 @@ STAGE=""; STAGE_ICON=""; STAGE_TITLE=""; STAGE_DETAIL=""
 ERROR_MSG=""; DOWNLOAD_URL=""; QR_B64=""
 FINAL_VERSION=""; PGY_CLEANUP=""
 SKIP_UPLOAD=0
+HISTORY_PARSE_ERROR=0
 
 # ============ 日志 ============
 # 注意：echo 到 stderr（>&2），避免在 $(...) 捕获时污染函数返回值
@@ -113,7 +114,9 @@ fi
 load_history() {
     [ -f "$PGY_HISTORY_FILE" ] || { log INFO "未找到 PGYUploadHistory.json（可选控制文件），跳过历史控制"; return 0; }
     if ! jq empty "$PGY_HISTORY_FILE" 2>/dev/null; then
-        log ERROR "PGYUploadHistory.json 格式错误，已忽略"
+        log ERROR "PGYUploadHistory.json 格式错误（非合法 JSON），已忽略"
+        # 标记：history 文件存在但解析失败，prepare_upload 中据此决定是否阻断上传
+        HISTORY_PARSE_ERROR=1
         return 0
     fi
     local vt ver des
@@ -134,6 +137,15 @@ prepare_upload() {
     load_history
     if [ "$SKIP_UPLOAD" = "1" ]; then
         log INFO "versionTarget 为空，跳过上传（由 PGYUploadHistory.json 控制）"
+        exit 0
+    fi
+    # history 文件存在但 JSON 格式错误 → 关键变量（版本目标/描述）全部缺失
+    # 若此时 PGY_VERSION_TARGET 仍未被其他途径设置，阻断上传并给出明确提示
+    if [ "$HISTORY_PARSE_ERROR" = "1" ] && [ -z "$PGY_VERSION_TARGET" ]; then
+        log ERROR "PGYUploadHistory.json 格式错误且无其他版本目标来源，终止上传"
+        STAGE="error"; STAGE_ICON="❌"; STAGE_TITLE="配置文件格式错误"
+        STAGE_DETAIL="PGYUploadHistory.json 不是合法的 JSON 格式。<br>请检查文件末尾是否有多余字符（如 <code>=</code>），修复后重新 Archive。<br><small>原始错误：jq 无法解析该文件</small>"
+        render_monitor; open "$MONITOR_HTML" 2>/dev/null || true
         exit 0
     fi
     if [ -z "$PGY_USER_KEY" ] || [ -z "$PGY_API_KEY" ]; then
