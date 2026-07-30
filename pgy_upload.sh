@@ -57,6 +57,8 @@ ARCHIVE_ARG=""
 # 由主进程传入的路径（后台上传模式时复用，不基于子进程 $$ 重新生成）
 INHERITED_MONITOR_HTML=""
 INHERITED_LOG_FILE=""
+# 目标 Bundle ID（用于校验找到的归档是否属于当前项目，防止上传其他 APP 的包）
+TARGET_BUNDLE_ID=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --archive)       ARCHIVE_ARG="$2"; shift 2;;
@@ -69,6 +71,7 @@ while [[ $# -gt 0 ]]; do
         --history)       PGY_HISTORY_FILE="$2"; shift 2;;
         --monitor-path)  INHERITED_MONITOR_HTML="$2"; shift 2;;   # 主进程传入的监控页路径
         --log-path)      INHERITED_LOG_FILE="$2"; shift 2;;      # 主进程传入的日志路径
+        --bundle-id)     TARGET_BUNDLE_ID="$2"; shift 2;;         # 目标 Bundle ID（归档身份校验）
         -h|--help) awk 'NR==1 && /^#!\//{next} /^#/{sub(/^#\ ?/,""); print; next} {exit}' "$0"; exit 0;;
         *) echo "未知参数: $1" >&2; exit 1;;
     esac
@@ -465,54 +468,107 @@ PGY_ARCHIVE_GRACE="${PGY_ARCHIVE_GRACE:-1800}"
 ARCHIVE_DIR="${HOME:-/Users/zuzhuli}/Library/Developer/Xcode/Archives"
 
 find_xcarchive() {
-    local cand=""
-    log INFO "[查找] ARCHIVE_DIR='$ARCHIVE_DIR' HOME='$HOME' grace=${PGY_ARCHIVE_GRACE}s"
+    log INFO "[查找] ARCHIVE_DIR='$ARCHIVE_DIR' HOME='$HOME' grace=${PGY_ARCHIVE_GRACE}s TARGET_BUNDLE_ID='${TARGET_BUNDLE_ID:-<未设置>}'"
 
-    # ── 策略 1：find -mmin（时间窗口内）──
+    # ── 收集候选列表（三策略合并去重）──
+    local candidates=()
     if [ -d "$ARCHIVE_DIR" ]; then
-        cand=$(find "$ARCHIVE_DIR" \
+        # 策略 1：find -mmin（时间窗口内）
+        local s1
+        s1=$(find "$ARCHIVE_DIR" \
             -name "*.xcarchive" -type d -mmin "-$((PGY_ARCHIVE_GRACE / 60))" 2>/dev/null \
-            | sort | tail -1) || true
-    fi
-    log INFO "[查找] 策略1(find -mmin): cand='${cand:-<无>}'"
-
-    # ── 策略 2：ls -1t 取最新（不限时间，覆盖 find 被沙箱限制）──
-    if [ -z "$cand" ] && [ -d "$ARCHIVE_DIR" ]; then
-        # Xcode archive 按日期组织：YYYY-MM-DD/name.xcarchive
-        cand=$(ls -1dt "$ARCHIVE_DIR"/*/*.xcarchive 2>/dev/null | head -1) || true
-    fi
-    log INFO "[查找] 策略2(ls -1t): cand='${cand:-<无>}'"
-
-    # ── 策略 3：glob 当日目录──
-    if [ -z "$cand" ] && [ -d "$ARCHIVE_DIR" ]; then
-        local today_dir
-        today_dir=$(date +%Y-%m-%d)
-        if [ -d "$ARCHIVE_DIR/$today_dir" ]; then
-            cand=$(ls -1dt "$ARCHIVE_DIR/$today_dir"/*.xcarchive 2>/dev/null | head -1) || true
+            | sort) || true
+        if [ -n "$s1" ]; then
+            while IFS= read -r line; do [ -n "$line" ] && candidates+=("$line"); done <<< "$s1"
         fi
-    fi
-    log INFO "[查找] 策略3(当日目录): cand='${cand:-<无>}'"
+        log INFO "[查找] 策略1(find -mmin) 找到 ${#candidates[@]} 个候选"
 
-    # ── 验证候选结果（用 glob 而非 find：find 在 Xcode sandbox 下可能被限制）──
-    if [ -n "$cand" ] && [ -d "$cand" ]; then
-        if [ -d "$cand/Products/Applications" ]; then
-            local app_count=0
-            shopt -s nullglob
-            local apps=("$cand/Products/Applications"/*.app)
-            app_count=${#apps[@]}
-            shopt -u nullglob
-            if [ "$app_count" -ge 1 ]; then
-                echo "$cand"
-                return 0
+        # 策略 2：ls -1t 全量最新（覆盖 find 被沙箱限制的情况）
+        local s2
+        s2=$(ls -1dt "$ARCHIVE_DIR"/*/*.xcarchive 2>/dev/null) || true
+        if [ -n "$s2" ]; then
+            while IFS= read -r line; do
+                [ -n "$line" ] && ! [[ " ${candidates[*]} " =~ " ${line} " ]] && candidates+=("$line")
+            done <<< "$s2"
+        fi
+        log INFO "[查找] 策略2(ls-1t) 后共 ${#candidates[@]} 个候选"
+
+        # 策略 3：当日目录 glob
+        if [ ${#candidates[@]} -eq 0 ]; then
+            local today_dir
+            today_dir=$(date +%Y-%m-%d)
+            if [ -d "$ARCHIVE_DIR/$today_dir" ]; then
+                local s3
+                s3=$(ls -1dt "$ARCHIVE_DIR/$today_dir"/*.xcarchive 2>/dev/null) || true
+                if [ -n "$s3" ]; then
+                    while IFS= read -r line; do [ -n "$line" ] && candidates+=("$line"); done <<< "$s3"
+                fi
             fi
-            log INFO "[查找] 候选存在但 Products/Applications 无 .app（app_count=$app_count），跳过"
-        else
-            log INFO "[查找] 候选缺少 Products/Applications: '$cand'"
+            log INFO "[查找] 策略3(当日目录) 后共 ${#candidates[@]} 个候选"
         fi
-    elif [ -n "$cand" ]; then
-        log INFO "[查找] 候选路径无效: '$cand'"
     fi
 
+    if [ ${#candidates[@]} -eq 0 ]; then
+        log INFO "[查找] 所有策略均未找到归档"
+        return 0
+    fi
+
+    # ── 逐个验证候选（含项目身份校验）──
+    for cand in "${candidates[@]}"; do
+        log INFO "[查找] 验证候选: '$cand'"
+
+        # 基本存在性检查
+        if [ ! -d "$cand" ]; then
+            log INFO "[查找] 跳过：路径不存在"
+            continue
+        fi
+        if [ ! -d "$cand/Products/Applications" ]; then
+            log INFO "[查找] 跳过：缺少 Products/Applications"
+            continue
+        fi
+
+        # 检查 .app 存在
+        shopt -s nullglob
+        local apps=("$cand/Products/Applications"/*.app)
+        shopt -u nullglob
+        if [ ${#apps[@]} -eq 0 ]; then
+            log INFO "[查找] 跳过：Products/Applications 下无 .app"
+            continue
+        fi
+
+        # ── 项目身份校验（核心安全检查）──
+        if [ -n "$TARGET_BUNDLE_ID" ]; then
+            local matched=0
+            for app in "${apps[@]}"; do
+                local app_bid
+                app_bid=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$app/Info.plist" 2>/dev/null) || true
+                if [ "$app_bid" = "$TARGET_BUNDLE_ID" ]; then
+                    matched=1
+                    break
+                fi
+            done
+            if [ "$matched" -ne 1 ]; then
+                local first_app_bids=""
+                for app in "${apps[@]}"; do
+                    local bid
+                    bid=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$app/Info.plist" 2>/dev/null) || true
+                    first_app_bids="${first_app_bids}${bid} "
+                done
+                log INFO "[查找] ⚠️ 跳过：Bundle ID 不匹配（期望 '${TARGET_BUNDLE_ID}'，实际: ${first_app_bids:-<无法读取>}）— 可能是其他项目的归档"
+                continue
+            fi
+            log INFO "[查找] ✅ Bundle ID 匹配: '$TARGET_BUNDLE_ID'"
+        else
+            log INFO "[查找] ⚠️ 未设置 TARGET_BUNDLE_ID，跳过身份校验（建议通过 --bundle-id 或配置文件指定）"
+        fi
+
+        # 通过所有校验 → 返回此候选
+        echo "$cand"
+        return 0
+    done
+
+    # 所有候选均未通过校验
+    log INFO "[查找] ${#candidates[@]} 个候选全部未通过校验（可能都不是当前项目的归档）"
     return 0
 }
 
@@ -566,6 +622,7 @@ if [ -n "$ARCHIVE_INPUT" ]; then
         ${PGY_UPDATE_DESCRIPTION:+--notes "$PGY_UPDATE_DESCRIPTION"} \
         ${PGY_METHOD:+--method "$PGY_METHOD"} \
         ${PGY_HISTORY_FILE:+--history "$PGY_HISTORY_FILE"} \
+        ${TARGET_BUNDLE_ID:+--bundle-id "$TARGET_BUNDLE_ID"} \
         >> "$LOG_FILE" 2>&1 &
     BG_PID=$!
     log INFO "后台上传进程已启动 (PID=$BG_PID)，Run Script 即将退出"
