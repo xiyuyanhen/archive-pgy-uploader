@@ -52,6 +52,7 @@ log() {
 }
 
 # ============ 命令行参数 ============
+UPLOAD_MODE=0
 ARCHIVE_ARG=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -60,7 +61,7 @@ while [[ $# -gt 0 ]]; do
         --notes)   PGY_UPDATE_DESCRIPTION="$2"; shift 2;;
         --target)  PGY_VERSION_TARGET="$2"; shift 2;;
         --method)  PGY_METHOD="$2"; shift 2;;
-        --_upload) break;;   # 后台上传入口：由主进程 nohup 调用，执行完整导出+上传流程
+        --_upload) UPLOAD_MODE=1; shift;;   # 后台上传入口：由主进程 nohup 调用
         --config)  CONFIG_FILE="$2"; shift 2;;
         --history) PGY_HISTORY_FILE="$2"; shift 2;;
         -h|--help) awk 'NR==1 && /^#!\//{next} /^#/{sub(/^#\ ?/,""); print; next} {exit}' "$0"; exit 0;;
@@ -502,7 +503,9 @@ find_xcarchive() {
     return 0
 }
 
-# ============ 主入口 ============
+# ============ 主入口（非 UPLOAD_MODE 时执行） ============
+# UPLOAD_MODE=1 时跳过此段，直接进入下方的 --_upload 处理块
+if [ "$UPLOAD_MODE" != "1" ]; then
 ARCHIVE_INPUT=""
 if [ -n "$ARCHIVE_ARG" ] && [ -e "$ARCHIVE_ARG" ]; then
     # --archive 传了有效路径 → 直接模式
@@ -536,8 +539,9 @@ if [ -n "$ARCHIVE_INPUT" ]; then
     STAGE="waiting"; STAGE_ICON="⏳"; STAGE_TITLE="准备上传"; STAGE_DETAIL="正在启动后台上传..."
     render_monitor
     open "$MONITOR_HTML" 2>/dev/null || true
-    # 传递所有配置参数给后台子进程
-    nohup "$0" \
+    # 传递所有配置参数给后台子进程（必须用绝对路径 + bash 显式调用，避免 nohup 执行权限问题）
+    SELF_PATH="$SCRIPT_DIR/$(basename "$0")"
+    nohup bash "$SELF_PATH" \
         --_upload \
         --archive "$ARCHIVE_INPUT" \
         --config "${CONFIG_FILE:-}" \
@@ -558,12 +562,13 @@ else
     render_monitor
     open "$MONITOR_HTML" 2>/dev/null || true
     exit 1
-fi
+fi   # ← 结束 if [ -n "$ARCHIVE_INPUT" ]
+fi   # ← 结束 UPLOAD_MODE != 1 守护（主入口段）
 
 # ============ --_upload 后台上传入口 ============
 # 由主进程通过 nohup 调用，独立执行完整导出+上传流程。
-# 此时所有参数已由主进程的参数解析循环处理完毕，直接执行。
-if [ "$1" = "--_upload" ]; then
+# UPLOAD_MODE 标志在参数解析时设置（--_upload 参数已被正常消费）。
+if [ "$UPLOAD_MODE" = "1" ]; then
     log INFO "====== 后台上传进程启动 ======"
     # 确认 archive 路径
     if [ -z "$ARCHIVE_ARG" ] || [ ! -e "$ARCHIVE_ARG" ]; then
