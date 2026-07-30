@@ -147,7 +147,8 @@ prepare_upload() {
 }
 
 # ============ 清理 ============
-trap 'rm -rf "$PGY_CLEANUP" 2>/dev/null || true' EXIT
+# 同时清理 copy 方案产生的临时归档副本（仅匹配 $TMPDIR/pgy_archive_*.xcarchive，绝不触碰真实 Xcode 归档）
+trap 'rm -rf "$PGY_CLEANUP" 2>/dev/null || true; case "$ARCHIVE_ARG" in *"/pgy_archive_"*.xcarchive) rm -rf "$ARCHIVE_ARG" 2>/dev/null || true;; esac' EXIT
 
 # ============ 实时监控页渲染 ============
 render_monitor() {
@@ -606,13 +607,28 @@ bundle_id_fatal() {
 # ============ 主入口（非 UPLOAD_MODE 时执行） ============
 # UPLOAD_MODE=1 时跳过此段，直接进入下方的 --_upload 处理块
 if [ "$UPLOAD_MODE" != "1" ]; then
-ARCHIVE_INPUT=""
+SRC_ARCHIVE=""
 if [ -n "$ARCHIVE_ARG" ] && [ -e "$ARCHIVE_ARG" ]; then
-    # --archive 传了有效路径 → 直接模式
-    ARCHIVE_INPUT="$ARCHIVE_ARG"
+    # --archive 传了有效路径（PostAction 下 Xcode 注入 $ARCHIVE_PATH，或手动指定）
+    SRC_ARCHIVE="$ARCHIVE_ARG"
 elif [ -n "$ARCHIVE_PATH" ] && [ -e "$ARCHIVE_PATH" ]; then
-    # 环境变量 $ARCHIVE_PATH 有效 → 直接模式
-    ARCHIVE_INPUT="$ARCHIVE_PATH"
+    SRC_ARCHIVE="$ARCHIVE_PATH"
+fi
+
+# 若拿到 Xcode 提供的归档路径：先 copy 到固定临时路径再做后续处理。
+# 这样后台上传进程持有独立副本，不受 Xcode 后续移动/清理归档目录影响，
+# 也避免 Run Script 直接依赖归档目录的 IO 时序。
+ARCHIVE_INPUT=""
+if [ -n "$SRC_ARCHIVE" ]; then
+    FIXED_TMP="$TMPDIR/pgy_archive_$$.xcarchive"
+    rm -rf "$FIXED_TMP" 2>/dev/null
+    if cp -R "$SRC_ARCHIVE" "$FIXED_TMP" 2>/dev/null; then
+        ARCHIVE_INPUT="$FIXED_TMP"
+        log INFO "使用 Xcode 提供的归档路径: $SRC_ARCHIVE → 已复制至临时路径 $FIXED_TMP"
+    else
+        ARCHIVE_INPUT="$SRC_ARCHIVE"
+        log WARN "复制归档至临时路径失败，直接使用原路径: $SRC_ARCHIVE"
+    fi
 fi
 
 # runOnlyForDeploymentPostprocessing=1 → 本脚本在 Archive 完成后才执行。
@@ -692,6 +708,7 @@ if [ "$UPLOAD_MODE" = "1" ]; then
     # 执行完整流程
     prepare_upload
     process_archive "$ARCHIVE_ARG"
+    # 临时归档副本的清理由全局 EXIT trap 统一处理（覆盖成功与失败路径）
     log INFO "====== 后台上传进程结束 ======"
     exit 0
 fi
