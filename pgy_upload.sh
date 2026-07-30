@@ -54,20 +54,33 @@ log() {
 # ============ 命令行参数 ============
 UPLOAD_MODE=0
 ARCHIVE_ARG=""
+# 由主进程传入的路径（后台上传模式时复用，不基于子进程 $$ 重新生成）
+INHERITED_MONITOR_HTML=""
+INHERITED_LOG_FILE=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --archive) ARCHIVE_ARG="$2"; shift 2;;
-        --version) PGY_VERSION_OVERRIDE="$2"; shift 2;;
-        --notes)   PGY_UPDATE_DESCRIPTION="$2"; shift 2;;
-        --target)  PGY_VERSION_TARGET="$2"; shift 2;;
-        --method)  PGY_METHOD="$2"; shift 2;;
-        --_upload) UPLOAD_MODE=1; shift;;   # 后台上传入口：由主进程 nohup 调用
-        --config)  CONFIG_FILE="$2"; shift 2;;
-        --history) PGY_HISTORY_FILE="$2"; shift 2;;
+        --archive)       ARCHIVE_ARG="$2"; shift 2;;
+        --version)       PGY_VERSION_OVERRIDE="$2"; shift 2;;
+        --notes)         PGY_UPDATE_DESCRIPTION="$2"; shift 2;;
+        --target)        PGY_VERSION_TARGET="$2"; shift 2;;
+        --method)        PGY_METHOD="$2"; shift 2;;
+        --_upload)       UPLOAD_MODE=1; shift;;
+        --config)        CONFIG_FILE="$2"; shift 2;;
+        --history)       PGY_HISTORY_FILE="$2"; shift 2;;
+        --monitor-path)  INHERITED_MONITOR_HTML="$2"; shift 2;;   # 主进程传入的监控页路径
+        --log-path)      INHERITED_LOG_FILE="$2"; shift 2;;      # 主进程传入的日志路径
         -h|--help) awk 'NR==1 && /^#!\//{next} /^#/{sub(/^#\ ?/,""); print; next} {exit}' "$0"; exit 0;;
         *) echo "未知参数: $1" >&2; exit 1;;
     esac
 done
+
+# 后台上传模式：复用主进程的文件路径（避免子进程 $$ 不同导致写到新文件）
+if [ -n "$INHERITED_MONITOR_HTML" ]; then
+    MONITOR_HTML="$INHERITED_MONITOR_HTML"
+fi
+if [ -n "$INHERITED_LOG_FILE" ]; then
+    LOG_FILE="$INHERITED_LOG_FILE"
+fi
 
 # ============ 加载配置 ============
 load_config() {
@@ -539,12 +552,15 @@ if [ -n "$ARCHIVE_INPUT" ]; then
     STAGE="waiting"; STAGE_ICON="⏳"; STAGE_TITLE="准备上传"; STAGE_DETAIL="正在启动后台上传..."
     render_monitor
     open "$MONITOR_HTML" 2>/dev/null || true
-    # 传递所有配置参数给后台子进程（必须用绝对路径 + bash 显式调用，避免 nohup 执行权限问题）
+    # 使用 nohup 后台执行，彻底脱离主进程（Xcode Run Script 退出后子进程继续运行）
+    # 关键：传入主进程的 MONITOR_HTML 和 LOG_FILE 路径，子进程复用（否则子进程 $$ 不同会写到新文件，浏览器看不到更新）
     SELF_PATH="$SCRIPT_DIR/$(basename "$0")"
     nohup bash "$SELF_PATH" \
         --_upload \
         --archive "$ARCHIVE_INPUT" \
         --config "${CONFIG_FILE:-}" \
+        --monitor-path "$MONITOR_HTML" \
+        --log-path "$LOG_FILE" \
         ${PGY_VERSION_OVERRIDE:+--version "$PGY_VERSION_OVERRIDE"} \
         ${PGY_VERSION_TARGET:+--target "$PGY_VERSION_TARGET"} \
         ${PGY_UPDATE_DESCRIPTION:+--notes "$PGY_UPDATE_DESCRIPTION"} \
@@ -570,6 +586,7 @@ fi   # ← 结束 UPLOAD_MODE != 1 守护（主入口段）
 # UPLOAD_MODE 标志在参数解析时设置（--_upload 参数已被正常消费）。
 if [ "$UPLOAD_MODE" = "1" ]; then
     log INFO "====== 后台上传进程启动 ======"
+    log INFO "后台上传: MONITOR_HTML='$MONITOR_HTML' LOG_FILE='$LOG_FILE' ARCHIVE_ARG='$ARCHIVE_ARG'"
     # 确认 archive 路径
     if [ -z "$ARCHIVE_ARG" ] || [ ! -e "$ARCHIVE_ARG" ]; then
         log ERROR "后台上传: 无效的 archive 路径 '${ARCHIVE_ARG:-<空>}'"
