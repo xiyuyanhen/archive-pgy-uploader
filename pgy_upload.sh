@@ -138,7 +138,11 @@ prepare_upload() {
     fi
     if [ -z "$PGY_USER_KEY" ] || [ -z "$PGY_API_KEY" ]; then
         echo "[ERROR] 未配置 Pgyer 凭证。请在 pgy_config.sh 中设置 PGY_USER_KEY / PGY_API_KEY，或导出为环境变量。" >&2
-        exit 1
+        # 凭证缺失 → 上传无法进行，但 Archive 已成功，不阻塞 Build
+        STAGE="error"; STAGE_ICON="❌"; STAGE_TITLE="上传失败"
+        STAGE_DETAIL="未配置蒲公英凭证（PGY_USER_KEY / PGY_API_KEY）。<br>请在 archive-pgy-config/pgy_config.sh 中配置。"
+        render_monitor; open "$MONITOR_HTML" 2>/dev/null || true
+        exit 0
     fi
 }
 
@@ -318,7 +322,7 @@ process_archive() {
             app_dir=$(find "$xcarchive/Products/Applications" -name "*.app" -maxdepth 1 -type d 2>/dev/null | head -1)
             if [ -z "$app_dir" ]; then
                 STAGE="error"; ERROR_MSG="归档中未找到 .app（请确认主应用已正确嵌入）"
-                render_monitor; log ERROR "归档中无 .app"; exit 1
+                render_monitor; log ERROR "归档中无 .app"; exit 0
             fi
             ;;
         *.app)
@@ -333,14 +337,14 @@ process_archive() {
             ;;
         *)
             STAGE="error"; ERROR_MSG="不支持的输入类型: $archive（仅支持 .xcarchive / .app / .ipa）"
-            render_monitor; exit 1;;
+            render_monitor; exit 0;;
     esac
 
     # 版本探测
     [ -z "$FINAL_VERSION" ] && [ -n "$app_dir" ] && detect_version "$app_dir"
     if [ -z "$FINAL_VERSION" ]; then
         STAGE="error"; ERROR_MSG="无法获取版本号，请用 --version 指定或检查 Info.plist"
-        render_monitor; log ERROR "版本号获取失败"; exit 1
+        render_monitor; log ERROR "版本号获取失败"; exit 0
     fi
 
     # 构造更新描述：$version $versionTarget 换行 $updateDes
@@ -357,7 +361,7 @@ process_archive() {
     if [ -n "$app_dir" ] && ! check_debug "$app_dir"; then
         STAGE="error"
         ERROR_MSG="检测到 Debug / Profile 模式构建，已拦截上传。<br>iOS 14+ 无法从主屏幕启动 Debug 包。<br>请使用 Product → Archive（Release）构建。"
-        render_monitor; log ERROR "Debug 模式拦截"; exit 1
+        render_monitor; log ERROR "Debug 模式拦截"; exit 0
     fi
 
     # 导出 IPA
@@ -395,12 +399,12 @@ EOF
         done
         if ! wait "$pid"; then
             STAGE="error"; ERROR_MSG="xcodebuild -exportArchive 失败，详见日志"
-            render_monitor; rm -rf "$exp_dir"; exit 1
+            render_monitor; rm -rf "$exp_dir"; exit 0
         fi
         ipa_path=$(find "$exp_dir" -name "*.ipa" -type f 2>/dev/null | head -1)
         if [ -z "$ipa_path" ] || [ ! -f "$ipa_path" ]; then
             STAGE="error"; ERROR_MSG="导出完成但未找到 .ipa 文件"
-            render_monitor; rm -rf "$exp_dir"; exit 1
+            render_monitor; rm -rf "$exp_dir"; exit 0
         fi
         PGY_CLEANUP="$exp_dir"
         log INFO "IPA 导出成功: $ipa_path ($(du -sh "$ipa_path" | cut -f1))"
@@ -416,7 +420,7 @@ EOF
 
     if [ -z "$ipa_path" ] || [ ! -f "$ipa_path" ]; then
         STAGE="error"; ERROR_MSG="未获得可上传的 IPA 文件"
-        render_monitor; exit 1
+        render_monitor; exit 0
     fi
 
     # 上传
@@ -586,13 +590,17 @@ find_xcarchive() {
 
 # 归档身份校验失败（找到有效归档但 Bundle ID 全部不匹配）→ 快速失败
 # 避免一直重试直到超时，也避免任何误传其他 APP 安装包的可能
+#
+# ⚠️ 重要：本脚本是 runOnlyForDeploymentPostprocessing=1 的 Run Script，
+#   在 Archive 成功后才执行。上传失败不应导致 Xcode 报 "Build Failed"，
+#   因此所有"上传相关失败"统一 exit 0，错误通过监控页传达。
 bundle_id_fatal() {
     log ERROR "找到的归档 Bundle ID 均与 TARGET_BUNDLE_ID 不匹配，疑似配置错误。终止上传以避免误传其他项目的安装包。"
     STAGE="error"; STAGE_ICON="❌"; STAGE_TITLE="归档身份校验失败"
     STAGE_DETAIL="找到的归档 Bundle ID 与配置的 TARGET_BUNDLE_ID 均不匹配。<br>请检查 pgy_config.sh 中的 TARGET_BUNDLE_ID 是否正确（当前期望: ${TARGET_BUNDLE_ID}）。<br><small>已拒绝上传，避免误传其他 APP 的安装包。</small>"
     render_monitor
     open "$MONITOR_HTML" 2>/dev/null || true
-    exit 1
+    exit 0
 }
 
 # ============ 主入口（非 UPLOAD_MODE 时执行） ============
@@ -664,7 +672,7 @@ else
     STAGE_DETAIL="在 ${PGY_MAX_WAIT}s 内未能发现 .xcarchive。<br>请确认 Xcode 已成功 Archive，或在 Run Script 中显式传入 --archive 路径。<br><small>ARCHIVE_DIR=$ARCHIVE_DIR</small>"
     render_monitor
     open "$MONITOR_HTML" 2>/dev/null || true
-    exit 1
+    exit 0   # 上传失败不阻塞 Build（Archive 已成功，这只是后处理脚本）
 fi   # ← 结束 if [ -n "$ARCHIVE_INPUT" ]
 fi   # ← 结束 UPLOAD_MODE != 1 守护（主入口段）
 
@@ -679,7 +687,7 @@ if [ "$UPLOAD_MODE" = "1" ]; then
         log ERROR "后台上传: 无效的 archive 路径 '${ARCHIVE_ARG:-<空>}'"
         STAGE="error"; STAGE_ICON="❌"; STAGE_TITLE="上传失败"
         STAGE_DETAIL="后台上传进程收到无效 archive 路径"
-        render_monitor; exit 1
+        render_monitor; exit 0
     fi
     # 执行完整流程
     prepare_upload
