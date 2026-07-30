@@ -60,7 +60,7 @@ while [[ $# -gt 0 ]]; do
         --notes)   PGY_UPDATE_DESCRIPTION="$2"; shift 2;;
         --target)  PGY_VERSION_TARGET="$2"; shift 2;;
         --method)  PGY_METHOD="$2"; shift 2;;
-        --_wait)   break;;   # 历史兼容：旧版后台轮询入口，现已弃用（改为主进程内同步重试）
+        --_upload) break;;   # 后台上传入口：由主进程 nohup 调用，执行完整导出+上传流程
         --config)  CONFIG_FILE="$2"; shift 2;;
         --history) PGY_HISTORY_FILE="$2"; shift 2;;
         -h|--help) awk 'NR==1 && /^#!\//{next} /^#/{sub(/^#\ ?/,""); print; next} {exit}' "$0"; exit 0;;
@@ -529,13 +529,27 @@ if [ -z "$ARCHIVE_INPUT" ]; then
 fi
 
 if [ -n "$ARCHIVE_INPUT" ]; then
-    # 归档已找到，同步执行完整流程（导出 + 上传）
-    log INFO "使用 archive: $ARCHIVE_INPUT"
-    STAGE="waiting"; STAGE_ICON="⏳"; STAGE_TITLE="准备上传"; STAGE_DETAIL="初始化..."
+    # 归档已找到 → 渲染初始监控页，fork 后台上传进程后立即退出
+    # 这样 Run Script 阶段秒退，Xcode Archive 立即完成（弹出成功弹窗），
+    # 导出 IPA + 上传蒲公英在后台独立执行，通过监控页跟踪进度。
+    log INFO "使用 archive: $ARCHIVE_INPUT → fork 后台上传"
+    STAGE="waiting"; STAGE_ICON="⏳"; STAGE_TITLE="准备上传"; STAGE_DETAIL="正在启动后台上传..."
     render_monitor
     open "$MONITOR_HTML" 2>/dev/null || true
-    prepare_upload
-    process_archive "$ARCHIVE_INPUT"
+    # 传递所有配置参数给后台子进程
+    nohup "$0" \
+        --_upload \
+        --archive "$ARCHIVE_INPUT" \
+        --config "${CONFIG_FILE:-}" \
+        ${PGY_VERSION_OVERRIDE:+--version "$PGY_VERSION_OVERRIDE"} \
+        ${PGY_VERSION_TARGET:+--target "$PGY_VERSION_TARGET"} \
+        ${PGY_UPDATE_DESCRIPTION:+--notes "$PGY_UPDATE_DESCRIPTION"} \
+        ${PGY_METHOD:+--method "$PGY_METHOD"} \
+        ${PGY_HISTORY_FILE:+--history "$PGY_HISTORY_FILE"} \
+        >> "$LOG_FILE" 2>&1 &
+    BG_PID=$!
+    log INFO "后台上传进程已启动 (PID=$BG_PID)，Run Script 即将退出"
+    exit 0
 else
     # 所有策略 + 重试均未找到 → 明确报错，避免永久卡在「等待」页
     log ERROR "在 ${PGY_MAX_WAIT}s 内未能通过任何策略找到 .xcarchive（ARCHIVE_DIR='$ARCHIVE_DIR'）。请确认 Xcode 已成功 Archive，或手动指定 --archive 路径。"
@@ -544,4 +558,23 @@ else
     render_monitor
     open "$MONITOR_HTML" 2>/dev/null || true
     exit 1
+fi
+
+# ============ --_upload 后台上传入口 ============
+# 由主进程通过 nohup 调用，独立执行完整导出+上传流程。
+# 此时所有参数已由主进程的参数解析循环处理完毕，直接执行。
+if [ "$1" = "--_upload" ]; then
+    log INFO "====== 后台上传进程启动 ======"
+    # 确认 archive 路径
+    if [ -z "$ARCHIVE_ARG" ] || [ ! -e "$ARCHIVE_ARG" ]; then
+        log ERROR "后台上传: 无效的 archive 路径 '${ARCHIVE_ARG:-<空>}'"
+        STAGE="error"; STAGE_ICON="❌"; STAGE_TITLE="上传失败"
+        STAGE_DETAIL="后台上传进程收到无效 archive 路径"
+        render_monitor; exit 1
+    fi
+    # 执行完整流程
+    prepare_upload
+    process_archive "$ARCHIVE_ARG"
+    log INFO "====== 后台上传进程结束 ======"
+    exit 0
 fi
