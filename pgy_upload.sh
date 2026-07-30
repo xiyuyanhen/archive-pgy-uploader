@@ -59,6 +59,9 @@ INHERITED_MONITOR_HTML=""
 INHERITED_LOG_FILE=""
 # 目标 Bundle ID（用于校验找到的归档是否属于当前项目，防止上传其他 APP 的包）
 TARGET_BUNDLE_ID=""
+# find_xcarchive 的返回值（避免命令替换子 shell 导致全局标志位丢失）
+FOUND_ARCHIVE=""
+FIND_ALL_REJECTED_BUNDLE=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --archive)       ARCHIVE_ARG="$2"; shift 2;;
@@ -514,6 +517,11 @@ find_xcarchive() {
     fi
 
     # ── 逐个验证候选（含项目身份校验）──
+    # found_any_valid: 是否至少找到一个含 .app 的有效归档（用于区分"还没生成"与"生成了但都不是我们的"）
+    # FIND_ALL_REJECTED_BUNDLE: 找到有效归档但全部被 Bundle ID 校验拒绝（疑似配置错误）→ 主循环据此快速失败
+    local found_any_valid=0
+    FOUND_ARCHIVE=""
+    FIND_ALL_REJECTED_BUNDLE=0
     for cand in "${candidates[@]}"; do
         log INFO "[查找] 验证候选: '$cand'"
 
@@ -535,6 +543,7 @@ find_xcarchive() {
             log INFO "[查找] 跳过：Products/Applications 下无 .app"
             continue
         fi
+        found_any_valid=1
 
         # ── 项目身份校验（核心安全检查）──
         if [ -n "$TARGET_BUNDLE_ID" ]; then
@@ -555,6 +564,9 @@ find_xcarchive() {
                     first_app_bids="${first_app_bids}${bid} "
                 done
                 log INFO "[查找] ⚠️ 跳过：Bundle ID 不匹配（期望 '${TARGET_BUNDLE_ID}'，实际: ${first_app_bids:-<无法读取>}）— 可能是其他项目的归档"
+                if [ "$found_any_valid" -eq 1 ]; then
+                    FIND_ALL_REJECTED_BUNDLE=1
+                fi
                 continue
             fi
             log INFO "[查找] ✅ Bundle ID 匹配: '$TARGET_BUNDLE_ID'"
@@ -562,14 +574,25 @@ find_xcarchive() {
             log INFO "[查找] ⚠️ 未设置 TARGET_BUNDLE_ID，跳过身份校验（建议通过 --bundle-id 或配置文件指定）"
         fi
 
-        # 通过所有校验 → 返回此候选
-        echo "$cand"
+        # 通过所有校验 → 写入全局变量返回（避免命令替换子 shell 导致标志位丢失）
+        FOUND_ARCHIVE="$cand"
         return 0
     done
 
     # 所有候选均未通过校验
     log INFO "[查找] ${#candidates[@]} 个候选全部未通过校验（可能都不是当前项目的归档）"
     return 0
+}
+
+# 归档身份校验失败（找到有效归档但 Bundle ID 全部不匹配）→ 快速失败
+# 避免一直重试直到超时，也避免任何误传其他 APP 安装包的可能
+bundle_id_fatal() {
+    log ERROR "找到的归档 Bundle ID 均与 TARGET_BUNDLE_ID 不匹配，疑似配置错误。终止上传以避免误传其他项目的安装包。"
+    STAGE="error"; STAGE_ICON="❌"; STAGE_TITLE="归档身份校验失败"
+    STAGE_DETAIL="找到的归档 Bundle ID 与配置的 TARGET_BUNDLE_ID 均不匹配。<br>请检查 pgy_config.sh 中的 TARGET_BUNDLE_ID 是否正确（当前期望: ${TARGET_BUNDLE_ID}）。<br><small>已拒绝上传，避免误传其他 APP 的安装包。</small>"
+    render_monitor
+    open "$MONITOR_HTML" 2>/dev/null || true
+    exit 1
 }
 
 # ============ 主入口（非 UPLOAD_MODE 时执行） ============
@@ -590,13 +613,20 @@ fi
 # 超时即给出明确错误，而不是永久卡在「等待 Xcode Archive 完成」页。
 if [ -z "$ARCHIVE_INPUT" ]; then
     log INFO "未收到有效的 archive 路径（--archive='${ARCHIVE_ARG:-<未传>}' ARCHIVE_PATH='${ARCHIVE_PATH:-<未设置>}'），启动多策略查找..."
-    ARCHIVE_INPUT=$(find_xcarchive) || true
+    find_xcarchive; ARCHIVE_INPUT="$FOUND_ARCHIVE"
+    # 找到归档但 Bundle ID 全不匹配（配置错误）→ 立即失败，不重试、不误传
+    if [ "$FIND_ALL_REJECTED_BUNDLE" = "1" ]; then
+        bundle_id_fatal
+    fi
     waited=0
     while [ -z "$ARCHIVE_INPUT" ] && [ "$waited" -lt "$PGY_MAX_WAIT" ]; do
         sleep 5
         waited=$((waited + 5))
         log INFO "轮询重试发现归档（已等待 ${waited}s / ${PGY_MAX_WAIT}s）..."
-        ARCHIVE_INPUT=$(find_xcarchive) || true
+        find_xcarchive; ARCHIVE_INPUT="$FOUND_ARCHIVE"
+        if [ "$FIND_ALL_REJECTED_BUNDLE" = "1" ]; then
+            bundle_id_fatal
+        fi
     done
 fi
 
