@@ -76,7 +76,7 @@ while [[ $# -gt 0 ]]; do
         --history)       PGY_HISTORY_FILE="$2"; shift 2;;
         --monitor-path)  INHERITED_MONITOR_HTML="$2"; shift 2;;   # 主进程传入的监控页路径
         --log-path)      INHERITED_LOG_FILE="$2"; shift 2;;      # 主进程传入的日志路径
-        --bundle-id)     TARGET_BUNDLE_ID="$2"; shift 2;;         # 目标 Bundle ID（归档身份校验）
+        --bundle-id)     CLI_BUNDLE_ID="$2"; shift 2;;             # 目标 Bundle ID（归档身份校验，source 配置后应用以覆盖配置默认值）
         --json)         PGY_JSON=1; shift;;                           # 结构化 JSON 输出（供 AI 工具解析）
         -h|--help) awk 'NR==1 && /^#!\//{next} /^#/{sub(/^#\ ?/,""); print; next} {exit}' "$0"; exit 0;;
         *) echo "未知参数: $1" >&2; exit 1;;
@@ -105,6 +105,13 @@ load_config() {
     done
 }
 load_config
+
+# CLI 覆盖配置默认值：确保命令行 --bundle-id 优先级高于配置文件，
+# 也高于外部环境可能注入的 TARGET_BUNDLE_ID（如某些 shell 沙箱注入的错误值）。
+# 配置文件本身已无条件赋值（项目身份真相源），此处仅在显式传参时覆盖。
+if [ -n "$CLI_BUNDLE_ID" ]; then
+    TARGET_BUNDLE_ID="$CLI_BUNDLE_ID"
+fi
 
 # ============ 依赖检查 ============
 if ! command -v jq &> /dev/null; then
@@ -458,7 +465,7 @@ EOF
             -exportPath "$exp_dir" \
             -exportOptionsPlist "$exp_opt" \
             -allowProvisioningUpdates \
-            -quiet 2>>"$LOG_FILE" &
+            -quiet >>"$LOG_FILE" 2>&1 &
         local pid=$!; local el=0
         while kill -0 "$pid" 2>/dev/null; do
             sleep 1; el=$((el+1))
