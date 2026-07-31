@@ -54,6 +54,7 @@ log() {
 
 # ============ 命令行参数 ============
 UPLOAD_MODE=0
+PGY_JSON=0
 ARCHIVE_ARG=""
 # 由主进程传入的路径（后台上传模式时复用，不基于子进程 $$ 重新生成）
 INHERITED_MONITOR_HTML=""
@@ -76,6 +77,7 @@ while [[ $# -gt 0 ]]; do
         --monitor-path)  INHERITED_MONITOR_HTML="$2"; shift 2;;   # 主进程传入的监控页路径
         --log-path)      INHERITED_LOG_FILE="$2"; shift 2;;      # 主进程传入的日志路径
         --bundle-id)     TARGET_BUNDLE_ID="$2"; shift 2;;         # 目标 Bundle ID（归档身份校验）
+        --json)         PGY_JSON=1; shift;;                           # 结构化 JSON 输出（供 AI 工具解析）
         -h|--help) awk 'NR==1 && /^#!\//{next} /^#/{sub(/^#\ ?/,""); print; next} {exit}' "$0"; exit 0;;
         *) echo "未知参数: $1" >&2; exit 1;;
     esac
@@ -125,7 +127,11 @@ load_history() {
     des=$(jq -r '.[0].updateDes // empty' "$PGY_HISTORY_FILE" 2>/dev/null)
     log INFO "PGYUploadHistory.json: versionTarget='${vt:-<空>}' version='${ver:-<空>}' updateDes='${des:-<空>}'"
     if [ -z "$vt" ]; then
-        SKIP_UPLOAD=1
+        # history 未提供 versionTarget：仅当命令行也未指定 --target 时才跳过上传。
+        # 这样 AI 工具触发时显式传 --target 即可绕过空 history 正常上传。
+        if [ -z "$PGY_VERSION_TARGET" ]; then
+            SKIP_UPLOAD=1
+        fi
         return 0
     fi
     [ -z "$PGY_VERSION_TARGET" ] && PGY_VERSION_TARGET="$vt"
@@ -137,7 +143,8 @@ prepare_upload() {
     load_history
     if [ "$SKIP_UPLOAD" = "1" ]; then
         log INFO "versionTarget 为空，跳过上传（由 PGYUploadHistory.json 控制）"
-        exit 0
+        RESULT_STATUS="skipped"; STAGE="success"
+        finish 0
     fi
     # history 文件存在但 JSON 格式错误 → 关键变量（版本目标/描述）全部缺失
     # 若此时 PGY_VERSION_TARGET 仍未被其他途径设置，阻断上传并给出明确提示
@@ -146,7 +153,7 @@ prepare_upload() {
         STAGE="error"; STAGE_ICON="❌"; STAGE_TITLE="配置文件格式错误"
         STAGE_DETAIL="PGYUploadHistory.json 不是合法的 JSON 格式。<br>请检查文件末尾是否有多余字符（如 <code>=</code>），修复后重新 Archive。<br><small>原始错误：jq 无法解析该文件</small>"
         render_monitor; open "$MONITOR_HTML" 2>/dev/null || true
-        exit 0
+        finish 1
     fi
     if [ -z "$PGY_USER_KEY" ] || [ -z "$PGY_API_KEY" ]; then
         echo "[ERROR] 未配置 Pgyer 凭证。请在 pgy_config.sh 中设置 PGY_USER_KEY / PGY_API_KEY，或导出为环境变量。" >&2
@@ -154,8 +161,43 @@ prepare_upload() {
         STAGE="error"; STAGE_ICON="❌"; STAGE_TITLE="上传失败"
         STAGE_DETAIL="未配置蒲公英凭证（PGY_USER_KEY / PGY_API_KEY）。<br>请在 archive-pgy-config/pgy_config.sh 中配置。"
         render_monitor; open "$MONITOR_HTML" 2>/dev/null || true
-        exit 0
+        finish 1
     fi
+}
+
+# ============ 结构化结果输出（--json 模式，供 AI 工具解析） ============
+RESULT_STATUS=""   # success | error | skipped（优先于 STAGE 推导）
+emit_result_json() {
+    local status="$RESULT_STATUS"
+    [ -z "$status" ] && { [ "$STAGE" = "success" ] && status="success" || status="error"; }
+    python3 - "$status" "$ERROR_MSG" "$FINAL_VERSION" "$PGY_VERSION_TARGET" \
+        "$PGY_UPDATE_DESCRIPTION" "$DOWNLOAD_URL" "$ARCHIVE_ARG" "${ipa_path:-}" \
+        "$LOG_FILE" "$MONITOR_HTML" <<'PYEOF'
+import json, sys
+status, err, ver, vtarget, udes, dl, arch, ipa, logf, mon = sys.argv[1:11]
+dl_url = ("https://www.pgyer.com/" + dl) if dl else None
+print(json.dumps({
+    "status": status,
+    "version": ver or None,
+    "versionTarget": vtarget or None,
+    "updateDescription": udes or None,
+    "downloadUrl": dl_url,
+    "archivePath": arch or None,
+    "ipaPath": ipa or None,
+    "logPath": logf or None,
+    "monitorPath": mon or None,
+    "error": (err or None) if status != "success" else None,
+}, ensure_ascii=False))
+PYEOF
+}
+# 统一收口：JSON 模式打印结果并按 code 退出；非 JSON（Xcode）场景永远 exit 0 不阻塞 Build
+finish() {
+    local code=$1
+    if [ "$PGY_JSON" = "1" ]; then
+        emit_result_json
+        exit "$code"
+    fi
+    exit 0
 }
 
 # ============ 清理 ============
@@ -333,7 +375,7 @@ process_archive() {
             app_dir=$(find "$xcarchive/Products/Applications" -name "*.app" -maxdepth 1 -type d 2>/dev/null | head -1)
             if [ -z "$app_dir" ]; then
                 STAGE="error"; ERROR_MSG="归档中未找到 .app（请确认主应用已正确嵌入）"
-                render_monitor; log ERROR "归档中无 .app"; exit 0
+                render_monitor; log ERROR "归档中无 .app"; finish 1
             fi
             ;;
         *.app)
@@ -348,14 +390,28 @@ process_archive() {
             ;;
         *)
             STAGE="error"; ERROR_MSG="不支持的输入类型: $archive（仅支持 .xcarchive / .app / .ipa）"
-            render_monitor; exit 0;;
+            render_monitor; finish 1;;
     esac
 
+    # ── Bundle ID 身份校验（防止上传其他项目的包；--_upload 直接传 --archive 时也生效）──
+    if [ -n "$TARGET_BUNDLE_ID" ] && [ -n "$app_dir" ] && [ -f "$app_dir/Info.plist" ]; then
+        local actual_bid
+        actual_bid=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$app_dir/Info.plist" 2>/dev/null || true)
+        if [ "$actual_bid" != "$TARGET_BUNDLE_ID" ]; then
+            STAGE="error"
+            ERROR_MSG="Bundle ID 校验失败：期望 <code>$TARGET_BUNDLE_ID</code>，实际 <code>$actual_bid</code>。<br>已拦截上传，避免误传其他项目的安装包。"
+            render_monitor; log ERROR "Bundle ID 不匹配 ($actual_bid != $TARGET_BUNDLE_ID)"
+            finish 1
+        fi
+    fi
+
     # 版本探测
-    [ -z "$FINAL_VERSION" ] && [ -n "$app_dir" ] && detect_version "$app_dir"
+    if [ -z "$FINAL_VERSION" ] && [ -n "$app_dir" ]; then
+        detect_version "$app_dir" || true   # 失败不阻断（set -e 下需 ||true），后续统一 finish
+    fi
     if [ -z "$FINAL_VERSION" ]; then
         STAGE="error"; ERROR_MSG="无法获取版本号，请用 --version 指定或检查 Info.plist"
-        render_monitor; log ERROR "版本号获取失败"; exit 0
+        render_monitor; log ERROR "版本号获取失败"; finish 1
     fi
 
     # 构造更新描述：$version $versionTarget 换行 $updateDes
@@ -372,7 +428,7 @@ process_archive() {
     if [ -n "$app_dir" ] && ! check_debug "$app_dir"; then
         STAGE="error"
         ERROR_MSG="检测到 Debug / Profile 模式构建，已拦截上传。<br>iOS 14+ 无法从主屏幕启动 Debug 包。<br>请使用 Product → Archive（Release）构建。"
-        render_monitor; log ERROR "Debug 模式拦截"; exit 0
+        render_monitor; log ERROR "Debug 模式拦截"; finish 1
     fi
 
     # 导出 IPA
@@ -410,12 +466,12 @@ EOF
         done
         if ! wait "$pid"; then
             STAGE="error"; ERROR_MSG="xcodebuild -exportArchive 失败，详见日志"
-            render_monitor; rm -rf "$exp_dir"; exit 0
+            render_monitor; rm -rf "$exp_dir"; finish 1
         fi
         ipa_path=$(find "$exp_dir" -name "*.ipa" -type f 2>/dev/null | head -1)
         if [ -z "$ipa_path" ] || [ ! -f "$ipa_path" ]; then
             STAGE="error"; ERROR_MSG="导出完成但未找到 .ipa 文件"
-            render_monitor; rm -rf "$exp_dir"; exit 0
+            render_monitor; rm -rf "$exp_dir"; finish 1
         fi
         PGY_CLEANUP="$exp_dir"
         log INFO "IPA 导出成功: $ipa_path ($(du -sh "$ipa_path" | cut -f1))"
@@ -431,7 +487,7 @@ EOF
 
     if [ -z "$ipa_path" ] || [ ! -f "$ipa_path" ]; then
         STAGE="error"; ERROR_MSG="未获得可上传的 IPA 文件"
-        render_monitor; exit 0
+        render_monitor; finish 1
     fi
 
     # 上传
@@ -720,5 +776,5 @@ if [ "$UPLOAD_MODE" = "1" ]; then
     process_archive "$ARCHIVE_ARG"
     # 临时归档副本的清理由全局 EXIT trap 统一处理（覆盖成功与失败路径）
     log INFO "====== 后台上传进程结束 ======"
-    exit 0
+    finish 0
 fi
