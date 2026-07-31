@@ -69,12 +69,13 @@ LOG_FILE="${TMPDIR:-/tmp}/pgy_upload_${TS}.log"
 # ---- 初始渲染「准备上传」监控页并打开（与 Xcode PostActions 路径对齐）----
 render_initial_monitor() {
     local target_label="${PGY_TARGET:-<待定>}"
-    cat > "$MONITOR_HTML" <<'HTMLEOF'
+    cat > "$MONITOR_HTML" <<HTMLEOF
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="refresh" content="2">
 <title>⏳ 准备上传</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
@@ -100,12 +101,8 @@ body{font-family:-apple-system,'SF Pro Text','Helvetica Neue',sans-serif;backgro
 <div class="stage-detail">正在启动后台上传...</div>
 <div class="progress-bar"><div class="progress-fill"></div></div>
 <div class="info-grid">
-  <div class="info-item"><span class="label">版本号</span><span class="value" id="ver">—</span></div>
-  <div class="info-item"><span class="label">版本目标</span><span class="value" id="tgt">HTMLEOF
-    # 注入版本目标（shell 变量插值）
-    echo -n "$target_label" >> "$MONITOR_HTML"
-    cat >> "$MONITOR_HTML" <<'HTMLEOF'
-</span></div>
+  <div class="info-item"><span class="label">版本号</span><span class="value">—</span></div>
+  <div class="info-item"><span class="label">版本目标</span><span class="value">${target_label}</span></div>
 </div>
 <p class="hint">💡 页面将自动刷新，请保持此标签页打开</p>
 </div>
