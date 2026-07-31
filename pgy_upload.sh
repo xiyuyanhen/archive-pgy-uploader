@@ -771,6 +771,12 @@ fi   # ← 结束 UPLOAD_MODE != 1 守护（主入口段）
 if [ "$UPLOAD_MODE" = "1" ]; then
     log INFO "====== 后台上传进程启动 ======"
     log INFO "后台上传: MONITOR_HTML='$MONITOR_HTML' LOG_FILE='$LOG_FILE' ARCHIVE_ARG='$ARCHIVE_ARG'"
+    # 安全网：若收到 --monitor-path 但文件尚不存在（调用方未初始渲染），自动补一个
+    if [ -n "$MONITOR_HTML" ] && [ ! -f "$MONITOR_HTML" ]; then
+        STAGE="waiting"; STAGE_ICON="⏳"; STAGE_TITLE="准备上传"; STAGE_DETAIL="正在启动后台上传..."
+        render_monitor
+        open "$MONITOR_HTML" 2>/dev/null || true
+    fi
     # 确认 archive 路径
     if [ -z "$ARCHIVE_ARG" ] || [ ! -e "$ARCHIVE_ARG" ]; then
         log ERROR "后台上传: 无效的 archive 路径 '${ARCHIVE_ARG:-<空>}'"

@@ -61,6 +61,59 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# ---- 监控页路径（与 pgy_upload.sh 共享，传 --monitor-path/--log-path 让子进程复用同一文件）----
+TS="$$"
+MONITOR_HTML="${TMPDIR:-/tmp}/pgy_monitor_${TS}.html"
+LOG_FILE="${TMPDIR:-/tmp}/pgy_upload_${TS}.log"
+
+# ---- 初始渲染「准备上传」监控页并打开（与 Xcode PostActions 路径对齐）----
+render_initial_monitor() {
+    local target_label="${PGY_TARGET:-<待定>}"
+    cat > "$MONITOR_HTML" <<'HTMLEOF'
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>⏳ 准备上传</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,'SF Pro Text','Helvetica Neue',sans-serif;background:#1e1e2e;color:#cdd6f4;display:flex;justify-content:center;align-items:center;min-height:100vh;padding:20px}
+.card{background:#313244;border-radius:16px;padding:40px;max-width:520px;width:100%;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,.4)}
+.spinner{width:48px;height:48px;margin:0 auto 20px;border:4px solid #45475a;border-top:4px solid#a6e3a1;border-radius:50%;animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.stage-title{font-size:22px;font-weight:600;margin-bottom:8px;color#cdd6f4}
+.stage-detail{font-size:14px;color:#a6adc8;margin-bottom:24px}
+.progress-bar{height:6px;background:#45475a;border-radius:3px;margin-bottom:28px;overflow:hidden}
+.progress-fill{height:100%;background:linear-gradient(90deg,#f9e2af,#fab387);border-radius:3px;width:30%;transition:width .5s}
+.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;text-align:left}
+.info-item{background:#181825;padding:12px 16px;border-radius:10px}
+.label{font-size:11px;color:#6c7086;text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:4px}
+.value{font-size:14px;font-weight:500;color:#bac2de}
+.hint{margin-top:20px;font-size:12px;color:#6c7086}
+</style>
+</head>
+<body>
+<div class="card">
+<div class="spinner"></div>
+<div class="stage-title">⏳ 准备上传</div>
+<div class="stage-detail">正在启动后台上传...</div>
+<div class="progress-bar"><div class="progress-fill"></div></div>
+<div class="info-grid">
+  <div class="info-item"><span class="label">版本号</span><span class="value" id="ver">—</span></div>
+  <div class="info-item"><span class="label">版本目标</span><span class="value" id="tgt">HTMLEOF
+    # 注入版本目标（shell 变量插值）
+    echo -n "$target_label" >> "$MONITOR_HTML"
+    cat >> "$MONITOR_HTML" <<'HTMLEOF'
+</span></div>
+</div>
+<p class="hint">💡 页面将自动刷新，请保持此标签页打开</p>
+</div>
+</body>
+</html>
+HTMLEOF
+}
+
 # ---- 加载配置（拿蒲公英凭证 + 默认 Bundle ID）----
 if [ -f "$CONFIG" ]; then
     # shellcheck disable=SC1090
@@ -129,7 +182,13 @@ else
 fi
 
 # ---- 调用 pgy_upload.sh（同步，--_upload + --json）----
-PGY_ARGS=(--_upload --archive "$ARCHIVE_PATH" --json --config "$CONFIG")
+# 先渲染并打开「准备上传」监控页（与 Xcode PostActions 路径对齐），
+# 再把监控页路径传给 pgy_upload.sh 让它持续更新同一文件。
+render_initial_monitor
+open "$MONITOR_HTML" 2>/dev/null || true
+
+PGY_ARGS=(--_upload --archive "$ARCHIVE_PATH" --json --config "$CONFIG"
+    --monitor-path "$MONITOR_HTML" --log-path "$LOG_FILE")
 [ -n "$PGY_TARGET" ]    && PGY_ARGS+=(--target "$PGY_TARGET")
 [ -n "$PGY_VERSION" ]   && PGY_ARGS+=(--version "$PGY_VERSION")
 [ -n "$PGY_NOTES" ]     && PGY_ARGS+=(--notes "$PGY_NOTES")
