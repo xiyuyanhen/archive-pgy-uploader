@@ -99,3 +99,37 @@ bash "${SRCROOT}/Scripts/archive-pgy-uploader/pgy_upload.sh" \
 
 自动打开一个本地 HTML 监控页（`<meta refresh>` 自刷新，成功/失败转静态结果页），
 无需 HTTP 服务、无 CORS 问题。
+
+---
+
+## AI / WorkBuddy 技能（扩展功能）
+
+本仓库附带一份 WorkBuddy 技能文档 `skill/SKILL.md`，描述如何用一条命令
+（`archive_upload.sh`）全自动 Archive 并上传蒲公英，**无需手动点 Xcode**，
+供 AI 工具准确触发。该技能随子模块分发，**支持多项目复用**。
+
+### 注册到 WorkBuddy
+WorkBuddy 只扫描项目级 `.workbuddy/skills/` 与用户级 `~/.workbuddy/skills/`，
+不会主动扫描子模块内部，因此其他项目引入本子模块后需注册一次：
+
+```bash
+# 在项目根目录运行：默认注册到项目级 .workbuddy/skills/archive-pgy-uploader/
+bash <子模块目录>/link-skill.sh
+
+# 或注册到用户级（本机所有项目直接可用）
+bash <子模块目录>/link-skill.sh -g
+```
+
+`link-skill.sh` 会把子模块内 `skill/SKILL.md` 以**相对路径软链**注册到 WorkBuddy
+技能扫描目录；子模块更新后重新运行 `link-skill.sh` 即可同步最新技能。
+加 `-f` 可在目标已存在时强制覆盖。
+
+### 技能触发
+注册后，AI 工具在收到「Archive 上传蒲公英」「构建并上传」等请求时，会调用：
+
+```bash
+bash <子模块目录>/archive_upload.sh --target "测试版本"
+```
+
+脚本输出单行 JSON（含 `downloadUrl` / `status` / `error`），退出码 `0`=成功或跳过、
+`1`=失败，详见 `skill/SKILL.md`。
