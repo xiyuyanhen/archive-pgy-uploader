@@ -293,7 +293,11 @@ ENDERR
             );;
     esac
 
-    cat > "$MONITOR_HTML" <<HTMLEOF
+    # 原子写入：先写到临时文件，再用 mv 替换。
+    # 避免浏览器在 cat > 覆写过程中读到空白/截断文件（上传阶段只渲染一次，
+    # 若刷新恰好落在写入窗口，监控页会短暂空白）。
+    local tmp_html="${MONITOR_HTML}.tmp.$$"
+    cat > "$tmp_html" <<HTMLEOF
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -340,6 +344,7 @@ $body_content
 </body>
 </html>
 HTMLEOF
+    mv -f "$tmp_html" "$MONITOR_HTML"
 }
 
 # ============ 版本号探测 ============
