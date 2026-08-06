@@ -35,3 +35,8 @@ export PGY_HISTORY_FILE="${CFG_DIR}/PGYUploadHistory.json"
 
 # 默认更新说明（可用 CLI --notes 覆盖）
 # export PGY_UPDATE_DESCRIPTION=""
+
+# 【安全】目标 Bundle ID：上传前比对归档的 Bundle ID，不匹配立即拦截，
+#   防止误传其他项目的安装包。强烈建议配置；留空则跳过身份校验（不拦截，
+#   但失去防误传保护）。CI / AI 触发路径也支持 --bundle-id 覆盖。
+# export TARGET_BUNDLE_ID="com.yourcompany.yourapp"

@@ -26,13 +26,21 @@
 └── Runner.xcodeproj/project.pbxproj   # Run Script
 ```
 
-**Run Script（Archive 后执行）**：
+**Post-actions（Archive 成功后执行，推荐）**：
+
+> ⚠️ `$ARCHIVE_PATH` 只在 **Scheme 的 Post-actions** 中由 Xcode 注入；
+> 普通 Build Phase 的 Run Script 里该变量恒为空，会导致脚本落入「等待模式」轮询最近生成的归档（行为不确定）。
+> 因此 Archive 触发的上传**必须放在 Post-actions**，而非 Build Phase Run Script。
+
+在 Xcode 中 `Edit Scheme → Archive → Post-actions` 添加 Run Script：
 
 ```bash
 bash "${SRCROOT}/Scripts/archive-pgy-uploader/pgy_upload.sh" \
   --config "${SRCROOT}/Scripts/archive-pgy-config/pgy_config.sh" \
   --archive "$ARCHIVE_PATH"
 ```
+
+（备选：若只能放在 Build Phase Run Script，可省略 `--archive`，脚本会进入等待模式轮询最新 `.xcarchive`；仍强烈建议改用 Post-actions。）
 
 引擎读取 `--config` 指定的项目配置 → 拿到密钥与 `PGY_HISTORY_FILE` → 再从控制文件
 决定**跳过/上传**、**版本号 / 版本目标 / 更新说明**。
@@ -75,7 +83,10 @@ bash "${SRCROOT}/Scripts/archive-pgy-uploader/pgy_upload.sh" \
    - `cp examples/pgy_config.example.sh pgy_config.sh` 并填入真实密钥
    - 放置 `PGYUploadHistory.json`（可参考 `examples/PGYUploadHistory.example.json`）
    - 项目 `.gitignore` 加入 `ios/Scripts/archive-pgy-config/pgy_config.sh`
-3. 在 Archive 的 Run Script（勾选 "Run script only when installing"）填入上方命令。
+3. 在 Xcode `Edit Scheme → Archive → Post-actions` 添加 Run Script，填入上方命令
+   （`$ARCHIVE_PATH` 仅在 Post-actions 注入；普通 Build Phase Run Script 里恒空，会落入等待模式）。
+   若用纯 Xcode 工程（非 CocoaPods / 非 Runner scheme），注意 `archive_upload.sh` 默认
+   `--scheme Runner` / `--workspace Runner.xcworkspace`，需改用 `--scheme` / `--workspace` 覆盖。
 4. `plutil -lint` 校验 pbxproj，Clean → Archive 实机验证一次。
 
 ---

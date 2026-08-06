@@ -32,6 +32,11 @@ bash <子模块目录>/archive_upload.sh [参数]
 `<子模块目录>` 即 `archive-pgy-uploader` 子模块根，项目内常见路径如
 `ios/Scripts/archive-pgy-uploader/archive_upload.sh`（按实际子模块位置调整）。
 
+> 工程结构假设：脚本默认 `--scheme Runner`、workspace 为 `Runner.xcworkspace`（CocoaPods 工程）。
+> 若你的工程 scheme 不叫 `Runner`、或纯 `.xcodeproj`（无 CocoaPods），请通过
+> `--scheme <你的scheme>` / `--workspace <你的.xcworkspace 或 .xcodeproj>` 覆盖；
+> 当 `Runner.xcworkspace` 不存在时，脚本会自动回退到 `Runner.xcodeproj`。
+
 ### 自动模式（推荐，全自动）
 不传 `--archive` 时脚本自动执行 `xcodebuild archive` 生成 .xcarchive，再导出上传：
 ```bash

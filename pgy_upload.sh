@@ -166,7 +166,7 @@ prepare_upload() {
         echo "[ERROR] 未配置 Pgyer 凭证。请在 pgy_config.sh 中设置 PGY_USER_KEY / PGY_API_KEY，或导出为环境变量。" >&2
         # 凭证缺失 → 上传无法进行，但 Archive 已成功，不阻塞 Build
         STAGE="error"; STAGE_ICON="❌"; STAGE_TITLE="上传失败"
-        STAGE_DETAIL="未配置蒲公英凭证（PGY_USER_KEY / PGY_API_KEY）。<br>请在 archive-pgy-config/pgy_config.sh 中配置。"
+        STAGE_DETAIL="未配置蒲公英凭证（PGY_USER_KEY / PGY_API_KEY）。<br>请在 pgy_config.sh 中配置（位于项目配置目录 / \$HOME / 子模块目录，或用 --config 指定路径）。"
         render_monitor; open "$MONITOR_HTML" 2>/dev/null || true
         finish 1
     fi

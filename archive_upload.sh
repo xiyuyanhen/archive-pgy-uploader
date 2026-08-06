@@ -39,6 +39,10 @@ DRY_RUN=0
 WORKSPACE="$IOS_DIR/Runner.xcworkspace"
 SCHEME="Runner"
 CONFIGURATION="Release"
+# 纯 Xcode 工程（无 CocoaPods）可能没有 .xcworkspace，自动回退到 .xcodeproj
+if [ ! -e "$WORKSPACE" ] && [ -e "${IOS_DIR}/Runner.xcodeproj" ]; then
+  WORKSPACE="${IOS_DIR}/Runner.xcodeproj"
+fi
 
 # ---- 参数解析 ----
 while [[ $# -gt 0 ]]; do
@@ -60,6 +64,14 @@ while [[ $# -gt 0 ]]; do
         *) echo "未知参数: $1" >&2; exit 1;;
     esac
 done
+
+# ---- 前置检查：蒲公英凭证配置是否存在（缺失时给出明确指引，而非静默失败）----
+if [ ! -f "$CONFIG" ]; then
+  echo "[archive_upload] ❌ 未找到蒲公英凭证配置: $CONFIG" >&2
+  echo "[archive_upload] 请复制 examples/pgy_config.example.sh 为 pgy_config.sh 并填入密钥，" >&2
+  echo "[archive_upload] 或用 --config <path> 指定配置路径。" >&2
+  exit 1
+fi
 
 # ---- 监控页路径（与 pgy_upload.sh 共享，传 --monitor-path/--log-path 让子进程复用同一文件）----
 TS="$$"
