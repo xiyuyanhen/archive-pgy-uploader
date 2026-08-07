@@ -71,6 +71,11 @@ bash "${SRCROOT}/Scripts/archive-pgy-uploader/pgy_upload.sh" \
 - `version` / `updateDes` → 仅在对应变量未被 CLI/config 赋值时作为默认值
 - 优先级：`--version/--notes/--target` > `pgy_config.sh`/环境变量 > 控制文件 > `Info.plist` 自动探测
 
+> ⚠️ **更新说明的来源取决于你走的入口（最容易踩坑）**：
+> - **Xcode Post-actions 入口**（推荐、`Edit Scheme → Archive → Post-actions`）：脚本只收到 `--config --archive`，**不会**收到 `--notes`。因此更新说明恒取自 `PGYUploadHistory.json [0].updateDes`。想改说明 → 直接改这个 JSON 文件（或临时改 `[0].updateDes`）后重新 Archive。
+> - **CLI / 手动入口**（`archive_upload.sh --notes "..."` 或 `pgy_upload.sh --archive xxx --notes "..."`）：才用 `--notes` 覆盖。
+> 换句话说：`--notes` 只在 CLI/手动路径生效；走 Xcode Post-actions 时它根本没被传入，改 `--notes` 不会影响 Xcode 触发的上传。不要误以为改 `--notes` 能影响 Xcode 路径的更新说明。
+
 ---
 
 ## 项目接入步骤

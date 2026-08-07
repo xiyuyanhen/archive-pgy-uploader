@@ -43,6 +43,7 @@ ERROR_MSG=""; DOWNLOAD_URL=""; QR_B64=""
 FINAL_VERSION=""; PGY_CLEANUP=""
 SKIP_UPLOAD=0
 HISTORY_PARSE_ERROR=0
+RESULT_EMITTED=0   # 是否已通过 finish→emit_result_json 输出结构化结果（供 EXIT 兜底判断）
 
 # ============ 日志 ============
 # 注意：echo 到 stderr（>&2），避免在 $(...) 捕获时污染函数返回值
@@ -196,6 +197,7 @@ print(json.dumps({
     "error": (err or None) if status != "success" else None,
 }, ensure_ascii=False))
 PYEOF
+    RESULT_EMITTED=1
 }
 # 统一收口：JSON 模式打印结果并按 code 退出；非 JSON（Xcode）场景永远 exit 0 不阻塞 Build
 finish() {
@@ -207,9 +209,21 @@ finish() {
     exit 0
 }
 
-# ============ 清理 ============
-# 同时清理 copy 方案产生的临时归档副本（仅匹配 $TMPDIR/pgy_archive_*.xcarchive，绝不触碰真实 Xcode 归档）
-trap 'rm -rf "$PGY_CLEANUP" 2>/dev/null || true; case "$ARCHIVE_ARG" in *"/pgy_archive_"*.xcarchive) rm -rf "$ARCHIVE_ARG" 2>/dev/null || true;; esac' EXIT
+# ============ 清理 / 退出兜底 ============
+# 进程退出统一收口：
+#   1. 清理临时产物（含 copy 方案产生的 $TMPDIR/pgy_archive_*.xcarchive，绝不触碰真实 Xcode 归档）；
+#   2. 若以 --json 模式运行、却因异常（如 set -e 误杀 / 工具缺失）在 finish 之前退出、
+#      尚未输出结果，则兜底输出一条结构化错误 JSON，避免调用方收到空输出 / 静默失败
+#      （即修复「CLI --_upload worker 静默退出」这类问题：任何失败都必须可被 AI/CI 解析到）。
+on_exit() {
+    rm -rf "$PGY_CLEANUP" 2>/dev/null || true
+    case "$ARCHIVE_ARG" in *"/pgy_archive_"*.xcarchive) rm -rf "$ARCHIVE_ARG" 2>/dev/null || true;; esac
+    if [ "$PGY_JSON" = "1" ] && [ "${RESULT_EMITTED:-0}" != "1" ]; then
+        # STAGE / LOG_FILE 均为脚本内部可控值（非外部输入），可直接构造 JSON
+        echo "{\"status\":\"error\",\"error\":\"上传进程异常退出（可能在导出或上传前），详见日志: ${LOG_FILE}\",\"logPath\":\"${LOG_FILE}\",\"stage\":\"${STAGE}\"}"
+    fi
+}
+trap on_exit EXIT
 
 # ============ 实时监控页渲染 ============
 render_monitor() {
