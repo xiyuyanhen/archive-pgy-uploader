@@ -700,13 +700,50 @@ bundle_id_fatal() {
     exit 0
 }
 
+# ============ 硬判定：本次归档是否由 xcodebuild CLI 驱动 ============
+# archive_upload.sh 会自己跑 `xcodebuild archive` 再调 --_upload worker 上传；
+# 但 xcodebuild archive 本身也会触发 Xcode 的 Post-actions（即本脚本主进程模式）。
+# 为避免「Post-actions 与 --_upload worker 双触发/双上传」，这里**不再依赖环境变量继承**，
+# 而是直接回溯本进程的祖先进程：若能找到 `xcodebuild`，说明本次是 CLI 驱动 → 主进程直接退出，
+# 上传交由 archive_upload.sh 拉起的 --_upload worker 完成；GUI Archive 的祖先是 Xcode.app
+# （无 xcodebuild 进程），则正常 fork worker 上传。
+# 该判定与 fastlane / CI 检测「是否由 xcodebuild 驱动构建」的思路一致，属进程树层面的硬判定，
+# 不依赖任何信号传递（环境变量继承在部分 Xcode 版本/配置下不可靠）。
+is_cli_archive_driven() {
+    local pid=$$ ppid= cmd= first= base=
+    for _ in $(seq 1 12); do
+        ppid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
+        [ -z "$ppid" ] || [ "$ppid" = "0" ] || [ "$ppid" = "1" ] && break
+        # 取父进程命令行：先去前导空白，再取首个 token（可执行路径），最后取其 basename 比对。
+        # ⚠️ 不能整体删除空格：否则 "xcodebuild -archivePath ..." 会变成 "xcodebuild-archivePath..."，
+        #    ${cmd%% *} 取不到正确 token，basename 不再是 xcodebuild，硬判定会完全失效。
+        # 精确比对 basename == "xcodebuild"，避免命令参数/路径里恰好出现 "xcodebuild" 字样造成误判。
+        cmd=$(ps -o command= -p "$ppid" 2>/dev/null)
+        cmd="${cmd#"${cmd%%[![:space:]]*}"}"
+        first="${cmd%%[[:space:]]*}"
+        base=$(basename "$first")
+        [ "$base" = "xcodebuild" ] && return 0
+        pid=$ppid
+    done
+    return 1
+}
+
 # ============ 主入口（非 UPLOAD_MODE 时执行） ============
 # UPLOAD_MODE=1 时跳过此段，直接进入下方的 --_upload 处理块
 if [ "$UPLOAD_MODE" != "1" ]; then
     # CLI 自动化（archive_upload.sh）驱动时，xcodebuild archive 会同时触发本 Post-actions
-    # 脚本。为避免重复上传、并让 archive_upload.sh 传入的 --notes 生效，CLI 会设置
-    # PGY_SKIP_POSTACTION=1；此时本主进程模式直接退出，上传交由 --_upload worker 完成。
+    # 脚本。为避免重复上传、并让 archive_upload.sh 传入的 --notes 生效，这里用进程树硬判定：
+    # 若祖先进程里有 xcodebuild，即 CLI 驱动 → 主进程直接退出，上传交由 --_upload worker 完成。
+    # GUI Archive 的祖先是 Xcode.app（无 xcodebuild 进程），则正常 fork worker 上传。
+    # 该判定与 fastlane / CI 检测「是否由 xcodebuild 驱动构建」思路一致，属进程树层面的硬判定，
+    # 不依赖任何信号传递。PGY_SKIP_POSTACTION 仅作为兜底（archive_upload.sh 仍会 export），
+    # 正常情况下硬判定已足够；env 兜底用于极端场景下 env 丢失但进程树仍可见的情况。
+    if is_cli_archive_driven; then
+        log INFO "硬判定：祖先进程含 xcodebuild → 本次归档由 CLI(archive_upload.sh) 驱动，Post-actions 跳过，避免双上传"
+        exit 0
+    fi
     if [ -n "${PGY_SKIP_POSTACTION:-}" ]; then
+        log INFO "兜底：PGY_SKIP_POSTACTION 已置位 → CLI 驱动，Post-actions 跳过"
         exit 0
     fi
 SRC_ARCHIVE=""

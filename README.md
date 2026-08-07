@@ -76,6 +76,9 @@ bash "${SRCROOT}/Scripts/archive-pgy-uploader/pgy_upload.sh" \
 > - **CLI / 手动入口**（`archive_upload.sh --notes "..."` 或 `pgy_upload.sh --archive xxx --notes "..."`）：才用 `--notes` 覆盖。
 > 换句话说：`--notes` 只在 CLI/手动路径生效；走 Xcode Post-actions 时它根本没被传入，改 `--notes` 不会影响 Xcode 触发的上传。不要误以为改 `--notes` 能影响 Xcode 路径的更新说明。
 
+> ⚠️ **双触发防护（CLI 自动化时避免重复上传）**：`archive_upload.sh` 会自己跑 `xcodebuild archive` 再调 `--_upload` worker 上传，但 `xcodebuild archive` **本身也会触发 Xcode Post-actions**（即本脚本的主进程模式），若不处理会双上传。
+> 防护采用**进程树硬判定**：主进程启动后回溯祖先进程，若发现某个祖先的可执行文件 basename 为 `xcodebuild`，即判定本次归档由 CLI 驱动 → 主进程直接 `exit 0`，上传交由 `archive_upload.sh` 拉起的 `--_upload` worker 完成；GUI Archive 的祖先是 `Xcode.app`（无 `xcodebuild` 进程），则正常 fork worker 上传。该判定不依赖任何信号/环境变量继承（旧版 `PGY_SKIP_POSTACTION` 仅作兜底）。判定的健壮性要点：比对的是祖先**命令行首个 token 的 basename**，而非整行子串，避免命令行参数里恰好出现 `xcodebuild` 字样造成误判。
+
 ---
 
 ## 项目接入步骤
