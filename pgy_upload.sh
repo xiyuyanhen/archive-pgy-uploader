@@ -685,6 +685,12 @@ bundle_id_fatal() {
 # ============ 主入口（非 UPLOAD_MODE 时执行） ============
 # UPLOAD_MODE=1 时跳过此段，直接进入下方的 --_upload 处理块
 if [ "$UPLOAD_MODE" != "1" ]; then
+    # CLI 自动化（archive_upload.sh）驱动时，xcodebuild archive 会同时触发本 Post-actions
+    # 脚本。为避免重复上传、并让 archive_upload.sh 传入的 --notes 生效，CLI 会设置
+    # PGY_SKIP_POSTACTION=1；此时本主进程模式直接退出，上传交由 --_upload worker 完成。
+    if [ -n "${PGY_SKIP_POSTACTION:-}" ]; then
+        exit 0
+    fi
 SRC_ARCHIVE=""
 if [ -n "$ARCHIVE_ARG" ] && [ -e "$ARCHIVE_ARG" ]; then
     # --archive 传了有效路径（PostAction 下 Xcode 注入 $ARCHIVE_PATH，或手动指定）

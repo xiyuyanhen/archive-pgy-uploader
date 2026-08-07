@@ -176,6 +176,9 @@ else
     ARCHIVE_TMP="$(mktemp -d)"
     ARCHIVE_PATH="$ARCHIVE_TMP/Runner.xcarchive"
     echo "[archive_upload] 开始 xcodebuild archive（自动生成 .xcarchive）..." >&2
+    # 标记本次归档由 CLI 自动化驱动：xcodebuild archive 会触发 Xcode Post-actions，
+    # 该脚本读取此变量后跳过自身上传，避免与下方 --_upload worker 重复上传/抢同一归档。
+    export PGY_SKIP_POSTACTION=1
     if ! xcodebuild archive \
             -workspace "$WORKSPACE" \
             -scheme "$SCHEME" \
