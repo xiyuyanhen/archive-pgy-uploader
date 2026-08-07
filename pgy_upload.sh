@@ -145,6 +145,10 @@ load_history() {
     [ -z "$PGY_VERSION_TARGET" ] && PGY_VERSION_TARGET="$vt"
     [ -z "$PGY_VERSION_OVERRIDE" ] && PGY_VERSION_OVERRIDE="$ver"
     [ -z "$PGY_UPDATE_DESCRIPTION" ] && PGY_UPDATE_DESCRIPTION="$des"
+    # 必须显式 return 0：上面三行以 `&&` 链结尾，当变量已被 --notes/config 预置为非空时，
+    # 末行的 `[ -z ... ]` 为 false → 整个函数返回 1 → 在 set -e 下会让 prepare_upload 返回 1
+    # 并直接中止脚本（表现为「worker 静默退出、未进入导出」）。显式 return 0 消除该误杀。
+    return 0
 }
 # ============ 上传前准备：读取控制文件 + 校验凭证 ============
 prepare_upload() {
