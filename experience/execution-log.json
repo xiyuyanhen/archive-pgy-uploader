@@ -1,0 +1,85 @@
+{
+  "schema_version": "1.0",
+  "project_name": "archive-pgy-uploader",
+  "entries": [
+    {
+      "run_id": "run-20260919-governance-baseline",
+      "date": "2026-09-19",
+      "project_version": "1.0.0",
+      "task": "建立项目治理基线（变更记录 + 交接机制）",
+      "outcome": "success",
+      "summary": "由 xiyu-project-governance 脚手架生成 STATUS.md / AGENTS.md / changelog / experience；随后据实补全 §2 能力表（C1–C10）、§3 入口与调用、§4 输入输出契约、§5 依赖与外部契约、§7 已知问题，并补强 .gitignore 凭证规则。",
+      "findings": [
+        "本项目此前无版本号体系（无 git tag、脚本内无版本常量）→ v1.0.0 定义为治理基线建立时的现状快照，非发布版本。",
+        "jq 是 pgy_upload.sh 的硬依赖（缺失即 exit 1），但 README 与 skill/SKILL.md 的前置条件均未登记 → 登记为 OPEN-003。",
+        "README「架构」文件树未列出 archive_upload.sh / link-skill.sh / skill/ → 登记为 OPEN-004。",
+        "skill/SKILL.md 第 13 行含 2 个 UTF-8 替换字符（U+FFFD）；git show HEAD 比对确认自 HEAD 起即存在 → 记 CR-002 校准修正。",
+        "本机 ~/.gitignore_global 含 '.gitignore' 一行，但本项目 .gitignore 已在版本控制内，git check-ignore 不命中，规则正常入库。",
+        "已核实凭证未泄漏：pgy_upload.sh / archive_upload.sh 中 PGY_USER_KEY / PGY_API_KEY 仅以变量名出现在提示文案，值不写入日志、监控页或 JSON 输出。",
+        "基线建立时工作区存在上一会话遗留未提交改动（.workbuddy/memory/2026-08-0{6,7}.md 追加、skill/SKILL.md 新增 Post-actions 章节），未回滚，随 CR-002 同批提交。",
+        "实测发现 bash -n 的多文件陷阱：bash -n a.sh b.sh 只检查 a.sh，b.sh 被当作位置参数且整体返回 0（假通过）。本会话曾据此写出错误的验证命令，已修正并沉淀为 L-005。"
+      ],
+      "artifacts": {
+        "files": [
+          "STATUS.md",
+          "AGENTS.md",
+          "changelog/CHANGES.md",
+          "changelog/CHANGELOG.md",
+          "changelog/v1.0.0.md",
+          "experience/INDEX.md",
+          "experience/LESSONS.md",
+          "experience/execution-log.json",
+          ".gitignore"
+        ]
+      },
+      "changes": ["CR-001", "CR-002"],
+      "open_issues_opened": ["OPEN-001", "OPEN-002", "OPEN-003", "OPEN-004", "OPEN-005"],
+      "lessons_added": ["L-001", "L-002", "L-003", "L-004", "L-005"]
+    },
+    {
+      "run_id": "run-20260919-lessons-backfill",
+      "date": "2026-09-19",
+      "project_version": "1.0.0",
+      "task": "回填历史经验条目 L-001 ~ L-004",
+      "outcome": "success",
+      "summary": "依据仓库 git 提交历史与项目工作记忆，将本项目此前 4 条已被真实事件验证的经验正式写入 experience/LESSONS.md（属回填，非本会话新观测）。",
+      "evidence": {
+        "commits": [
+          {
+            "hash": "6576a6f",
+            "subject": "feat: 进程树硬判定彻底杜绝双触发（不再依赖环境变量继承）",
+            "supports": "L-003"
+          },
+          {
+            "hash": "6c805cf",
+            "subject": "fix: load_history 显式 return 0，修复 set -e 误杀（--notes 预置非空时 worker 静默退出）",
+            "supports": "L-002"
+          },
+          {
+            "hash": "6d3f476",
+            "subject": "fix: --_upload worker 不再静默退出 + README 澄清更新说明双来源",
+            "supports": "L-004"
+          },
+          {
+            "hash": "0c5152a",
+            "subject": "fix: CLI 自动化时跳过 Xcode Post-actions 自触发，避免重复上传并让 --notes 生效",
+            "supports": "L-003, L-004"
+          }
+        ],
+        "project_memory": [
+          ".workbuddy/memory/2026-08-08.md（xiyu_todo_list Post-actions 静默不执行，根因＝Xcode 不热加载共享 scheme）",
+          ".workbuddy/memory/MEMORY.md（诊断 SOP：无日志＝脚本未启动；日志归属靠 IPA 名 / Bundle ID 区分）"
+        ]
+      },
+      "findings": [
+        "L-001（Xcode 不热加载外部手改的共享 .xcscheme）是本项目历史上最贵的坑：症状为「不上传 + 无日志」，且极易被误判为引擎故障。",
+        "L-002 的排查要点：「没有日志」与「有日志但停在某一步」是两类不同故障，前者=脚本未启动，后者=脚本内提前退出。"
+      ],
+      "artifacts": {
+        "files": ["experience/LESSONS.md"]
+      },
+      "changes": [],
+      "open_issues_opened": []
+    }
+  ]
+}
