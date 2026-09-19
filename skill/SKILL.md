@@ -10,7 +10,7 @@ description: >-
 # Archive → 蒲公英上传（archive-pgy-uploader）
 
 ## 用途
-将 iOS 项目自动 Archive（生成 .xcarchive）+ 导出 IPA + 上传蒲公英，供测试��员扫码下载。
+将 iOS 项目自动 Archive（生成 .xcarchive）+ 导出 IPA + 上传蒲公英，供测试人员扫码下载。
 供 AI 工具用一条命令准确触发，**无需手动点 Xcode**。
 
 > 本技能是 `archive-pgy-uploader` 子模块的扩展功能，作为子模块的一部分分发。
@@ -144,3 +144,39 @@ bash <子模块目录>/link-skill.sh -g
 
 注册本质是把子模块内 `skill/SKILL.md` 软链到 WorkBuddy 的技能扫描目录；
 子模块更新后重新运行 `link-skill.sh` 即可同步最新技能。
+
+## 可选：Xcode GUI `Archive` 后自动上传（Post-actions）
+若希望从 Xcode `Product → Archive` 后**自动**触发上传（而非上面的 CLI 入口），
+可在共享 `Runner.xcscheme` 的 `ArchiveAction` 注入 Post-actions 调用 `pgy_upload.sh`：
+
+```xml
+<PostActions>
+   <ExecutionAction
+      ActionType = "Xcode.IDEStandardExecutionActionsCore.ExecutionActionType.ShellScriptAction">
+      <ActionContent
+         title = "Upload to Pgyer"
+         scriptText = "bash &quot;${SRCROOT}/Scripts/archive-pgy-uploader/pgy_upload.sh&quot; --config &quot;${SRCROOT}/Scripts/archive-pgy-config/pgy_config.sh&quot; --archive &quot;$ARCHIVE_PATH&quot;&#10;"
+         shellToInvoke = "/bin/sh">
+         <EnvironmentBuildable>
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "<Runner target UUID>"
+               BuildableName = "Runner.app"
+               BlueprintName = "Runner"
+               ReferencedContainer = "container:Runner.xcodeproj">
+            </BuildableReference>
+         </EnvironmentBuildable>
+      </ActionContent>
+   </ExecutionAction>
+</PostActions>
+```
+
+> ⚠️ **关键坑（必读）**：Xcode **不会热加载**外部手改的共享 `.xcscheme`。
+> 用文本/脚本注入 Post-actions 后，必须**完全退出 Xcode 再重开项目**才生效；
+> 否则 Archive 跑的是内存里旧方案（无 Post-actions），表现为「不上传、无日志」。
+> 最稳妥的做法是在 Xcode `Edit Scheme → Archive → + → New Run Script Phase` 里**手动**添加，
+> 或在接入后显式提示用户重开 Xcode、到 Edit Scheme 确认脚本已出现。
+>
+> **若不确定 Post-actions 是否真生效，优先用上面的 CLI 入口** `archive_upload.sh`
+> 验证整条上传链路——它自己跑 `xcodebuild archive`，完全不依赖 Xcode GUI 的 scheme 缓存，
+> 是规避此类问题最干净的路径。
