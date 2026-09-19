@@ -127,6 +127,62 @@
       "open_issues_opened": [],
       "open_issues_closed": ["OPEN-003", "OPEN-004"],
       "lessons_added": ["L-006", "L-007", "L-008"]
+    },
+    {
+      "run_id": "run-20260919-release-tag-sync-target",
+      "date": "2026-09-19",
+      "project_version": "1.2.0",
+      "task": "同步目标由「每个 HEAD」改为「发布标签驱动」：新增 --target/--tag/--allow-downgrade、ahead-of-target 状态，修正钩子语义",
+      "outcome": "success",
+      "summary": "v1.1.0 的默认目标是本机 HEAD，等价于「每提交一次就让所有宿主重新 pin」。实测两个纯文档/记忆提交（6fadcb2、c6c32b4）各触发一轮 3 宿主 gitlink 更新，上一轮甚至为规避该副作用而故意不提交记忆文件。使用者拍板改为 tag 目标后，把同步目标与发布标签绑定：默认 --target release 取最新 v* 标签，新增 --tag vX.Y.Z（带 project_version 一致性护栏）与 --tag --apply 组合主路径，状态机扩为四值（新增 ahead-of-target 并定义为良性），post-commit 钩子改为「仅 HEAD 正好是发布标签时才 apply」作兜底，并补打 v1.1.0 作为约定起点。",
+      "findings": [
+        "「提交」与「值得让宿主移动」不是一回事：判据已在 STATUS.md §8.4 写明（影响宿主调用行为：参数/默认值/输出 JSON 字段/退出码/生成物路径）。默认目标与本判据矛盾，是 v1.1.0 的设计缺口。",
+        "仓库此前无任何 git tag，若直接把默认目标设为 release 会立刻不可用 → 补打 v1.1.0（指向 0734932）；v1.0.0 按 §1 语义（治理基线快照、非发布版本）不打标签，保持历史诚实。",
+        "git 没有 post-tag 钩子，而发版常规顺序是「先 commit、后 tag」→ post-commit 永远不会因打标签触发，第一版钩子（HEAD 落在发布标签上就 apply）在常规路径下形同虚设 → 沉淀为 L-010，并把发布做成显式命令 --tag --apply，钩子降级为兜底。",
+        "原二值状态机无法表达「宿主 pin 是目标的后代」：当时 3 宿主 pin 在 c6c32b4、v1.1.0 标签在 0734932，会被误判为 diverged → 新增 ahead-of-target 并定义为良性（不计入 attention、--check 不返回 2、默认不动、回落需 --allow-downgrade）；up-to-date 改为 pinned==target 直接判定，不再用 behind==0 反推。",
+        "set -o pipefail 下 `jq … | grep -q` 会让条件反向判假：读端命中即退 → 写端收 SIGPIPE(141) → 管道判非零 → 名单重复检查会放行重复项。当前 3 条数据不触发（输出远小于管道缓冲），属潜在缺陷；改为 jq -e 'any(...)' 内联判定并沉淀为 L-009。",
+        "钩子「仅提示」模式原先写 --check --quiet，而 --quiet 会把要打印的报告一起吞掉，与注释「落后时打印报告」不符 → 改为静默取退出码、仅 rc=2 时重跑打印（rc=1 的 die 信息本就在 stderr）。",
+        "--tag 内置 project_version 一致性护栏（标签须与 STATUS.md frontmatter 相同，且工作区干净、标签不存在）→ 把「升版本」从人的自觉变成机械约束；副作用是补打历史标签必须用原生 git tag -a <tag> <commit>。"
+      ],
+      "evidence": {
+        "commits": [
+          {
+            "hash": "0734932",
+            "subject": "feat(sync): 新增本机多宿主同步器 sync-hosts.sh + .local 名单模式（v1.1.0）",
+            "supports": "补打发布标签 v1.1.0 的落点（第一个影响宿主调用行为的发布）"
+          },
+          {
+            "hash": "c6c32b4",
+            "subject": "docs(memory): v1.1.0 落地记录与多项目共享约定",
+            "supports": "纯文档提交曾推进宿主 pin —— 本次变更的直接动因"
+          }
+        ]
+      },
+      "artifacts": {
+        "files": [
+          "sync-hosts.sh",
+          "STATUS.md",
+          "README.md",
+          "changelog/CHANGES.md",
+          "changelog/CHANGELOG.md",
+          "changelog/v1.2.0.md",
+          "experience/LESSONS.md",
+          "experience/execution-log.json"
+        ],
+        "tags": [
+          "v1.1.0（补打，指向 0734932，发布标签约定的起点）",
+          "v1.2.0（本版发布标签，指向本版提交）"
+        ],
+        "external": {
+          "not_done": [
+            "引擎 commit 与本版发布标签均未 push origin（OPEN-005），push 由使用者主导",
+            "标签未 push 时，他人/新克隆看不到 release 同步目标"
+          ]
+        }
+      },
+      "changes": ["CR-005"],
+      "open_issues_opened": [],
+      "lessons_added": ["L-009", "L-010"]
     }
   ]
 }

@@ -27,6 +27,53 @@
 
 ---
 
+## CR-005 — 同步目标由「每个 HEAD」改为「发布标签驱动」（默认 `--target release`）
+
+- **变更时间**：2026-09-19
+- **变更类型**：功能变更（新增能力 + **默认值变更**）
+- **关联版本**：v1.2.0
+- **变更原因**：v1.1.0 的默认目标是**本机 HEAD**，等价于「引擎每提交一次，就让本机所有宿主重新 pin 一次」。实测两个**纯文档 / 记忆**提交（`6fadcb2`、`c6c32b4`）各触发一轮 3 宿主 gitlink 更新；上一轮甚至为规避该副作用而**故意不提交**记忆文件。按 §8.4 的项目约定，只有「影响宿主调用行为」的变更才值得让宿主移动，故把同步目标与发布标签绑定。使用者决策原话：「把同步目标从『每个 HEAD』改成 tag 或专用 stable 分支（只有行为变更才移动）」。
+
+**变更前后差异**
+
+| 项 | 变更前（v1.1.0） | 变更后（v1.2.0） |
+| --- | --- | --- |
+| 默认同步目标 | `local`（本机引擎仓 HEAD）——每提交即推进宿主 | `release`（**最新发布标签 `v*`**，`--sort=-v:refname`）——只有发布才推进宿主 |
+| 目标选择 | 仅 `--from-origin`（布尔开关） | `--target release\|local\|origin`（显式三值）；`--from-origin` 保留为 `--target origin` 别名 |
+| 无标签时的行为 | 不适用（跟 HEAD） | **显式报错并给出指引**（先 `--tag`，或临时 `--target local/origin`）——不静默退回 HEAD |
+| 发布动作 | 无 | `--tag vX.Y.Z`：只对**最新发布标签**取 `^{commit}`；护栏 = 标签格式合法 + 工作区干净 + 标签不存在 + **与 STATUS.md `project_version` 一致**（不一致即拒绝） |
+| 发布并同步 | 无 | `--tag vX.Y.Z --apply`：先打标签，再以该新标签为目标同步各宿主（**推荐主路径**） |
+| 状态机 | 二值：`up-to-date` / `outdated` | 四值：新增 `ahead-of-target`（宿主 pin 是目标的**后代**）；`pinned == target` 单独判定为 `up-to-date` |
+| `ahead-of-target` 语义 | 不存在（会被误判为 `diverged`） | 定义为**良性**：不计入「需人工处理」、`--check` 不因它返回 `2`；默认不动，回落需显式 `--allow-downgrade` |
+| `--apply` 触发条件 | 仅当存在 `outdated` | 只要名单非空即进入决策循环（输出每行的 `ACTION`）；`--allow-downgrade` 时 `ahead-of-target` 也可被改动 |
+| 输出 JSON | `engine{path,head,target,source}` | 增 `engine.target_short` / `engine.release_tag`（无则 `null`）与 `summary{total,outdated,ahead_of_target,attention}` |
+| `post-commit` 钩子 `--auto` | 每次提交后 `--apply`（与新默认自相矛盾） | **仅当 HEAD 正好是发布标签时**才 `--apply`，定位为兜底（常规顺序是「先提交、后打标签」，`post-commit` 对 tag 不生效，钩子赶不上发布） |
+| 钩子「仅提示」模式 | `--check --quiet`（`--quiet` 把报告一起吞掉，实际什么都不打印，与注释不符） | 静默跑取退出码，**仅 `rc=2`（有落后/需人工处理）时**重跑一次打印完整报告 |
+| 名单重复检查 | `jq … \| grep -q`（`pipefail` 下写端收 SIGPIPE(141) → 条件判假 → 重复登记会**反向放行**） | `jq -e 'any(...)'` 内联判定，去掉管道；`--only` 匹配改为纯 bash 循环（支持多值与空格容错） |
+
+**影响范围**：`sync-hosts.sh`（参数、默认值、状态取值、输出 JSON 字段、钩子内容）；`STATUS.md`（§1 版本号语义、§3.3、§8.4、§8.5、§9.3、`OPEN-005` 说明）；`README.md`（跟随同步章节）；`changelog/CHANGELOG.md`；新增发布标签 `v1.1.0`。
+**兼容性说明**：**默认值变更（需调用方知晓）**——不带 `--target` 直接跑 `--check` / `--apply` 时，语义从「跟本机 HEAD」变为「跟最新发布标签」，且在引擎仓无 `v*` 标签时会**报错退出（code 1）**而非静默继续。参数层面**向后兼容**：`--from-origin` 仍是有效别名，v1.1.0 的其它参数与退出码语义不变。**`archive_upload.sh` / `pgy_upload.sh` / `link-skill.sh` 零改动**，宿主调用链不受影响（`sync-hosts.sh` 只在本机跑）。
+**验证方式**：
+
+```bash
+bash -n sync-hosts.sh                                        # 语法（逐文件，见 L-005）
+bash sync-hosts.sh --check                                   # 无标签时：报错退出 1，并给出 --tag / --target 指引
+bash sync-hosts.sh --json | jq -e '.status,.error'           # JSON 模式下错误也是合法 JSON
+bash sync-hosts.sh --target bogus                            # 非法目标：拒绝并打印用法（退出码 1）
+bash sync-hosts.sh --check                                   # release 目标：3 宿主 ahead-of-target，退出码 0（良性）
+bash sync-hosts.sh --apply --allow-downgrade --dry-run       # 回落动作可预览，不落改动
+bash sync-hosts.sh --json | jq -e '.hosts|length == 3'       # 条目完整（防 L-007 静默丢记录）
+bash sync-hosts.sh --tag 1.2                                 # 格式非法 → 拒绝
+bash sync-hosts.sh --tag v9.9.9                              # 与 project_version 不一致 → 拒绝
+bash sync-hosts.sh --tag v1.2.0 --apply                      # 主路径：打标签 + 推宿主到该发布版本
+bash sync-hosts.sh --install-hook && bash .git/hooks/post-commit   # 钩子可装可跑、仅 rc=2 时打印报告
+```
+
+> ⚠️ 本轮**补打** `v1.1.0` 标签（指向 `0734932`）。这是「发布标签」约定的起点，属一次性迁移：`--tag` 只对当前 HEAD 生效且带 `project_version` 护栏（当时 frontmatter 为 1.1.0、HEAD 却已是纯文档提交 `c6c32b4`），故 v1.1.0 用原生 `git tag -a` 补打。`v1.0.0` 按 §1 语义（治理基线快照、非发布版本）**不打标签**。
+> ⚠️ 发布标签与引擎 commit 一样**需要 push**（`OPEN-005`）；本机 sandbox 无 codeup 凭证，push 由使用者主导。
+
+---
+
 ## CR-004 — 新增本机多宿主同步器 `sync-hosts.sh` 与 `.local` 名单模式
 
 - **变更时间**：2026-09-19

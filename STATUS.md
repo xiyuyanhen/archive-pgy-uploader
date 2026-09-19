@@ -3,9 +3,9 @@ document_type: "project-status"
 schema_version: "1.0"
 status_version: "1.0"
 project_name: "archive-pgy-uploader"
-project_version: "1.1.0"
+project_version: "1.2.0"
 last_calibrated: "2026-09-19"
-calibration_state: "baseline"
+calibration_state: "current"
 authority: "本文件是本项目现状的唯一事实来源；与 README / AGENTS.md 冲突时以本文件为准"
 repository: "https://codeup.aliyun.com/61c852431ccc3a1faae0a9fa/scripts/archive-pgy-uploader.git"
 project_type: "code"
@@ -27,7 +27,7 @@ entrypoints:
   - id: "hosts-sync"
     name: "sync-hosts.sh — 本机多宿主 gitlink 跟随同步（.local 名单模式，仅本机使用）"
     path: "sync-hosts.sh"
-    args: "[--check|--apply|--list|--json] [--from-origin] [--only <names>] [--no-commit] [--allow-dirty] [--dry-run] [--add <name> <宿主路径> <子模块相对路径>] [--remove <name>] [--install-hook [--auto]] [--uninstall-hook]"
+    args: "[--check|--apply|--list|--json] [--target release|local|origin] [--tag vX.Y.Z] [--only <names>] [--no-commit] [--allow-dirty] [--allow-downgrade] [--dry-run] [--add <name> <宿主路径> <子模块相对路径>] [--remove <name>] [--install-hook [--auto]] [--uninstall-hook]（--from-origin = --target origin，兼容别名）"
 change_control:
   entry_doc: "AGENTS.md"
   status_doc: "STATUS.md"
@@ -42,7 +42,7 @@ change_control:
 known_issues:
   - {id: "OPEN-001", severity: "medium", status: "by-design", summary: "Xcode 不热加载外部手改的共享 .xcscheme：注入 Post-actions 后未完全重开 Xcode 则不生效，表现为「不上传、无日志」"}
   - {id: "OPEN-002", severity: "low", status: "by-design", summary: "--notes 仅在 CLI/手动入口生效；Xcode Post-actions 入口根本不接收该参数，更新说明恒取自 PGYUploadHistory.json [0].updateDes"}
-  - {id: "OPEN-005", severity: "medium", status: "by-design", summary: "子模块接入要求引擎 commit 已 push origin；仅本地 commit 会导致他人/新克隆解析不到 gitlink"}
+  - {id: "OPEN-005", severity: "medium", status: "by-design", summary: "子模块接入要求引擎 commit 已 push origin；仅本地 commit 会导致他人/新克隆解析不到 gitlink。自 v1.2.0 起发布标签（vX.Y.Z）同理需 push，否则他人/新克隆看不到 release 同步目标"}
 ---
 
 # STATUS.md — 项目状态与交接基线
@@ -56,16 +56,21 @@ known_issues:
 | 项 | 值 |
 | --- | --- |
 | 项目名称 | `archive-pgy-uploader` |
-| 项目版本 | 1.1.0 |
+| 项目版本 | 1.2.0 |
 | 状态文档版本 | 1.0 |
-| 最近校准 | 2026-09-19（v1.1.0：新增多宿主同步器；`xiyuWebBrowser` 接入收敛为 submodule；关闭 `OPEN-003`/`OPEN-004`） |
+| 最近校准 | 2026-09-19（v1.2.0：同步目标改为**发布标签驱动**；新增 `--tag` / `--allow-downgrade` / `ahead-of-target` 状态；钩子改为只在发布时同步） |
 | 一句话定位 | 通用 Xcode Archive → 蒲公英(Pgyer) 自动上传引擎（多项目以 submodule 共享，配置与密钥按项目分离） |
 | 成熟度 | 已在 3 个 iOS 项目实际使用且接入方式已统一为 submodule（xiyuScoreboard / xiyu_todo_list / xiyuWebBrowser）；治理基线自 v1.0.0 起 |
 | 远端仓库 | https://codeup.aliyun.com/61c852431ccc3a1faae0a9fa/scripts/archive-pgy-uploader.git |
 
-> **版本号语义**：本项目在此基线前**没有版本号体系**（无 git tag、脚本内无版本常量）。
+> **版本号语义**：本项目在治理基线建立前**没有版本号体系**（无 git tag、脚本内无版本常量）。
 > `v1.0.0` 不表示"发布版本"，而是**建立治理基线时的现状快照**——即当时 HEAD 的可用能力集合。
 > 后续按 §8.4 规则递增；`v1.0.0.md` 是首份版本档案。
+>
+> **自 v1.2.0 起，版本号与 git 发布标签（`vX.Y.Z`）绑定**：标签是各宿主 gitlink 的同步目标
+> （`sync-hosts.sh --target release` 默认取最新 `v*`）。因此「升版本」不再只是文档动作，
+> 它决定宿主何时被推进。相应地，**只有影响宿主调用行为的变更才打标签**。
+> `v1.1.0` 为事后补打的第一个发布标签（`v1.0.0` 属治理基线快照，按上述语义**不打标签**）。
 
 ## 2. 目标与范围
 
@@ -84,6 +89,7 @@ known_issues:
 | C9 | 技能注册器：把 `skill/SKILL.md` 以相对软链注册到 WorkBuddy 扫描目录 | `link-skill.sh` | 稳定 | 支持项目级 / 用户级 |
 | C10 | 项目配置与控制文件模板 | `examples/` | 稳定 | `pgy_config.example.sh` / `PGYUploadHistory.example.json` |
 | C11 | 本机多宿主跟随同步：按 `.local/hosts.json` 名单体检 / 批量更新各宿主 gitlink（含可选 post-commit 自动跟随） | `sync-hosts.sh` | 稳定 | 仅本机使用，**不 push**；名单 gitignored（v1.1.0 新增） |
+| C12 | **发布标签驱动的同步目标**：默认只跟「最新发布标签 `v*`」，只有影响宿主调用行为的变更才推进标签 → 文档 / 记忆类提交不再让所有宿主无谓重新 pin | `sync-hosts.sh --target release`（默认）+ `--tag` | 稳定 | v1.2.0 新增；`--target local/origin` 保留为开发期 / 交接期逃生口 |
 
 ### 2.2 明确不做（范围外）
 
@@ -158,37 +164,55 @@ bash <引擎目录>/pgy_upload.sh --archive /path/to/Runner.xcarchive \
 | `--json` | stdout 输出结构化 JSON |
 | `-h` / `--help` | 打印头部注释 |
 
-### 3.3 本机多宿主同步（`sync-hosts.sh`，v1.1.0 新增）
+### 3.3 本机多宿主同步（`sync-hosts.sh`，v1.1.0 新增 / v1.2.0 引入发布标签目标）
 
 > **仅在本机使用，不进入宿主调用链**——宿主项目无需更新 gitlink 即可继续工作。
 > 名单文件 `.local/hosts.json`（**gitignored、本机私有**）：`{schema, engineRemote, hosts:[{name, path, submodule}]}`，
 > 可用 `PGY_SYNC_REGISTRY` 覆盖名单路径。
 
+**同步目标（`--target`，默认 `release`）**——决定「宿主该跟到哪个引擎版本」：
+
+| 取值 | 含义 | 适用 |
+| --- | --- | --- |
+| `release`（默认） | 跟**最新发布标签** `v*`（`--sort=-v:refname` 取最新） | 日常：只有发布才移动宿主 |
+| `local` | 跟**本机引擎仓 HEAD** | 引擎开发期快速联调（无版本锚点，勿用于交接） |
+| `origin` | 跟 **`origin/HEAD` 指向的分支** | 交接 / 多机 / CI（需先 push） |
+
+> `release` 是默认目标；引擎仓**没有任何 `v*` 标签**时直接报错并给出指引（不会静默退回 HEAD）。
+> `--from-origin` 保留为 `--target origin` 的兼容别名。
+
 | 参数 | 说明 |
 | --- | --- |
 | `--check`（默认） | 只读体检：逐宿主报告固定 commit / 落后多少 / 状态 / 是否脏 |
-| `--json` | stdout **单行 JSON**（`status` / `engine{path,head,target,source}` / `hosts[]` / `error`） |
+| `--json` | stdout **单行 JSON**（`status` / `engine{path,head,target,target_short,source,release_tag}` / `summary{total,outdated,ahead_of_target,attention}` / `hosts[]` / `error`） |
 | `--list` | 打印本机名单 |
+| `--target <release\|local\|origin>` | 选择同步目标（默认 `release`） |
+| `--tag vX.Y.Z` | 在当前 HEAD 打**发布标签**（发布动作）；与 `STATUS.md` 的 `project_version` **不一致即拒绝**，工作区脏也拒绝 |
 | `--apply` | 对「状态 = outdated 且工作区干净」的宿主：`fetch` + `checkout --detach <目标>` + `git add <子模块路径>` + **本地** commit |
 | `--no-commit` | 只 checkout + stage，不 commit |
-| `--from-origin` | 目标取 `origin/HEAD` 指向的分支（**默认取本机 HEAD**，引擎刚提交、未 push 也能跟随） |
 | `--only <a,b>` | 只处理指定宿主 |
 | `--allow-dirty` | 越过「宿主工作区脏则跳过」的默认拒绝（gitlink 更新带 pathspec，不会卷入宿主其它改动） |
+| `--allow-downgrade` | 允许把 `ahead-of-target`（pin 比目标新）的宿主**回落到**目标（默认不动，见下） |
 | `--dry-run` | 只打印将执行的动作 |
 | `--add` / `--remove` | 维护本机名单（`--add <name> <宿主路径> <子模块相对路径>`） |
-| `--install-hook [--auto]` / `--uninstall-hook` | 装 / 卸本机 `post-commit` 钩子；默认**仅提示**，`--auto` 才自动同步；`PGY_SYNC_HOOK_DISABLE=1` 可临时禁用 |
+| `--install-hook [--auto]` / `--uninstall-hook` | 装 / 卸本机 `post-commit` 钩子；`--auto` **只在「HEAD 正好是发布标签」（= 一次发布）时**才 `--apply`，普通提交只提示；`PGY_SYNC_HOOK_DISABLE=1` 可临时禁用 |
 
-**状态取值**：`up-to-date` / `outdated` / `uncommitted-gitlink`（子模块已 add 但宿主从未 commit）/ `diverged` /
-`unknown-engine-commit` / `not-a-submodule` / `not-a-repo` / `missing`。
-除 `outdated` 外**都不会**被 `--apply` 自动处理，只给人工提示。
+**状态取值**：`up-to-date` / `outdated` / `ahead-of-target`（宿主 pin 是目标的**后代**，即比发布版本新）/
+`uncommitted-gitlink`（子模块已 add 但宿主从未 commit）/ `diverged` / `unknown-engine-commit` /
+`not-a-submodule` / `not-a-repo` / `missing`。
+
+- 只有 `outdated`（以及显式 `--allow-downgrade` 下的 `ahead-of-target`）会被 `--apply` 改动；其余只给人工提示。
+- `ahead-of-target` **是良性状态**（宿主已包含发布版本的行为），不计入「需人工处理」，也不会让 `--check` 返回 `2`。
 
 **退出码**：`0` = 一致或全部成功；`2` = 存在落后或需人工介入（仅 `--check` 语义）；`1` = 执行出错。
 **前置依赖**：`jq`（硬依赖，启动即校验）、`git`。
 
 ```bash
-bash sync-hosts.sh                          # 体检：谁落后了、落后多少
-bash sync-hosts.sh --apply                  # 一键把本机所有登记宿主推到引擎当前版本（仅本地 commit）
-bash sync-hosts.sh --install-hook --auto    # 可选：引擎仓每次提交后自动跟随
+bash sync-hosts.sh                          # 体检：谁没跟上最新发布版本
+bash sync-hosts.sh --apply                  # 一键把本机所有登记宿主推到最新发布标签（仅本地 commit）
+bash sync-hosts.sh --tag v1.2.0             # 判定为行为变更 → 打发布标签（标签即宿主同步目标）
+bash sync-hosts.sh --target local --check   # 开发期：改看本机 HEAD
+bash sync-hosts.sh --install-hook --auto    # 可选：发布时自动跟随（普通提交不动宿主）
 ```
 
 ## 4. 输入输出契约
@@ -298,7 +322,7 @@ bash sync-hosts.sh --install-hook --auto    # 可选：引擎仓每次提交后�
 | --- | --- | --- | --- | --- | --- | --- |
 | OPEN-001 | medium | Xcode 不热加载外部手改的共享 `.xcscheme` | 用文本/脚本注入 Post-actions，且未完全退出重开 Xcode | Archive 后不上传、`$TMPDIR` 无 `pgy_upload_*.log`（脚本根本没启动） | ① 优先走 CLI 入口 `archive_upload.sh`（不依赖 scheme 缓存）；② 在 Xcode `Edit Scheme → Archive → +` 手动添加；③ 接入后**完全退出 Xcode 重开** | by-design |
 | OPEN-002 | low | `--notes` 仅在 CLI/手动入口生效 | 走 Xcode Post-actions 入口时该参数未传入 | 更新说明恒取 `PGYUploadHistory.json [0].updateDes`，改 `--notes` 看似无效 | 改 JSON 的 `updateDes`，或改走 `archive_upload.sh` | by-design |
-| OPEN-005 | medium | 子模块接入要求引擎 commit 已 push origin | 仅本地 commit 未 push 即在他处/新克隆使用 | 新克隆解析不到 gitlink commit，子模块拉取失败 | 引擎侧改动先 push 再由宿主更新 gitlink；本机 sandbox 无 codeup 凭证，需人工 push | by-design |
+| OPEN-005 | medium | 子模块接入要求引擎 commit 已 push origin | 仅本地 commit 未 push 即在他处/新克隆使用 | 新克隆解析不到 gitlink commit，子模块拉取失败（v1.2.0 起**发布标签同理需 push**，否则看不到 release 目标） | 引擎侧改动先 push 再由宿主更新 gitlink；本机 sandbox 无 codeup 凭证，需人工 push | by-design |
 
 **已关闭条目**（处置过程见 `changelog/CHANGES.md`，本表不再保留）：
 
@@ -364,6 +388,11 @@ bash sync-hosts.sh --install-hook --auto    # 可选：引擎仓每次提交后�
 > 纯文档修正 / 错别字 / 排障补充 / 不改变行为的校准 → 记 CR 并标注「无版本变更」，**不升版本**。
 > （依据：本治理体系的设计规则——「影响运行行为 → 升版本」，未影响运行行为的校准只需在 §9 留痕。）
 > 注：v1.0.0 为治理基线建立时的现状快照，非发布版本（见 §1）。
+>
+> **自 v1.2.0 起，升版本的收尾动作包含打发布标签**：
+> `bash sync-hosts.sh --tag vX.Y.Z`（或 `--tag vX.Y.Z --apply` 一并推宿主）。标签即宿主同步目标，
+> 因此「升版本」直接影响宿主何时被推进——**不该升版本时不要打标签**，否则会让所有宿主无谓重新 pin。
+> `--tag` 内置护栏：标签必须与 frontmatter 的 `project_version` 一致，且工作区干净、标签不存在。
 
 ### 8.5 变更完成检查清单
 
@@ -371,6 +400,7 @@ bash sync-hosts.sh --install-hook --auto    # 可选：引擎仓每次提交后�
 - [ ] `STATUS.md` 正文受影响章节已同步（能力表 / 契约表 / 已知问题表）
 - [ ] `changelog/CHANGES.md` 已追加条目（含验证方式）
 - [ ] 影响运行行为的变更已升版本并建 `changelog/vX.Y.Z.md` + 更新 `CHANGELOG.md` 索引
+- [ ] 影响宿主调用行为的变更已打发布标签（`sync-hosts.sh --tag vX.Y.Z`），并提醒 push 标签（`OPEN-005`）
 - [ ] 新问题已在 §7 分配 `OPEN-NNN` 编号
 - [ ] 已记录执行日志到 `experience/execution-log.json`
 - [ ] 已完成语法/构建校验，文档与代码一致
@@ -399,3 +429,14 @@ bash sync-hosts.sh --install-hook --auto    # 可选：引擎仓每次提交后�
 | 5 | 文档债 `OPEN-003` / `OPEN-004` | 与本版新增能力直接相关（新增入口同样硬依赖 `jq`；README 文件树还要再加一项） | 随 CR-004 一并关闭，见 §7「已关闭条目」 |
 | 6 | 引擎 HEAD 未 push origin | `origin/master` 停在 `155046c`，本机 HEAD 为 `6fadcb2` | 不自动 push（push 由使用者主导）；在 CR-003 与 `changelog/v1.1.0.md` 中显式标注 `OPEN-005` 的影响面 |
 | 7 | §4.1 输入契约示例含**真实 Bundle ID** | `TARGET_BUNDLE_ID=com.xiyu.browser` 出现在示例单元格，违反本仓 §2.2「不得写入真实 Bundle ID（示例一律用占位符）」；系基线建立时未剥离 | 校准修正为 `com.example.app`（仅文档，不改运行行为；同时纳入 CR-004 的影响范围） |
+
+### 9.3 2026-09-19 v1.2.0 校准（同步目标改为发布标签驱动）
+
+| # | 事项 | 判定 | 处理方式 |
+| --- | --- | --- | --- |
+| 1 | 同步目标语义（使用者拍板） | v1.1.0 的默认目标是**本机 HEAD**，即「每提交一次就推进各宿主 pin」。实测两个**纯文档/记忆**提交（`6fadcb2`、`c6c32b4`）各引发一轮 3 宿主 gitlink 更新；上一轮为避免此副作用，记忆文件**故意未提交** | 默认目标改为 `release`（最新发布标签 `v*`），只有影响宿主调用行为的变更才推进标签；`local` / `origin` 保留为开发期与交接期逃生口 |
+| 2 | 仓库**没有任何 git tag** | 新默认一上线会立刻不可用（无标签可跟）。CHANGELOG 原已声明 `v1.0.0` 是「治理基线快照，不是发布版本」 | 补打 `v1.1.0`（指向 `0734932`，第一个影响行为的发布；**不给 `v1.0.0` 打标签**，保持历史诚实）；并把「版本号 ↔ 发布标签」的绑定与判据写入 §1 与 §8.4 |
+| 3 | 钩子语义与新默认**互相矛盾** | 原 `--auto` = 「每次提交后 `--apply`」；且**常规顺序是「先提交、后打标签」，而 `post-commit` 只对 commit 生效 → 钩子永远赶不上发布**（HEAD 在 commit 时尚未带标签） | ① 钩子改为「仅当 HEAD 正好是发布标签时才 `--apply`」，定位为**兜底**；② 发布主路径改为 `--tag vX.Y.Z --apply`（打标签 + 推宿主，一条命令）；③ `--tag` 单独使用时打印后续两步命令 |
+| 4 | 状态机缺一个状态 | 原二值（`up-to-date` / `outdated`）无法表达「宿主 pin 是目标的**后代**」——当时 3 个宿主 pin 在 `c6c32b4`、而 v1.1.0 标签在 `0734932`，会被误判为 `diverged` | 扩为四值，新增 `ahead-of-target` 并定义为**良性**（宿主已含发布版本行为）：不计入「需人工处理」、`--check` 不因此返回 `2`；回落需显式 `--allow-downgrade` |
+| 5 | 钩子的 `--check --quiet` 与文档记述不符 | 钩子注释写「落后时打印报告」，但 `--quiet` 会把报告一起吞掉，实际什么都不打印 | 改为「静默跑取退出码，仅当 `rc=2` 时重跑一次打印完整报告」；`rc=1`（出错）的 `die` 信息本就写在 stderr，不重复打印 |
+| 6 | `jq … \| grep -q` 在 `set -o pipefail` 下的隐患 | 读端（`grep -q`）命中即退出 → 写端 `jq` 收 `SIGPIPE`(141) → pipefail 使条件判为「假」。名单重复登记检查会**反向放行**（当前 3 条数据量下不会触发，属潜在缺陷） | 改为 `jq -e 'any(...)'` 内联判定，去掉管道；`--only` 的字符串匹配也改为纯 bash 循环（顺带支持多值与空格容错） |

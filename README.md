@@ -151,19 +151,28 @@ bash "${SRCROOT}/Scripts/archive-pgy-uploader/pgy_upload.sh" \
 # 1) 登记需要跟随的项目（每个项目一次）
 bash sync-hosts.sh --add xiyuScoreboard /path/to/xiyuScoreboard ios/Scripts/archive-pgy-uploader
 
-# 2) 随时体检：谁落后了、落后多少
+# 2) 随时体检：谁没跟上最新发布版本
 bash sync-hosts.sh                 # 加 --json 可输出单行 JSON 供 AI/CI 解析
 
-# 3) 一键同步：更新各宿主 gitlink 并本地 commit（不 push）
+# 3) 发布并同步（推荐主路径）：打发布标签 + 把各宿主推到该版本
+bash sync-hosts.sh --tag v1.2.0 --apply
+
+# 4) 只想同步（标签已存在时）
 bash sync-hosts.sh --apply
 
-# 可选：引擎仓每次提交后自动跟随
-bash sync-hosts.sh --install-hook --auto     # 默认仅提示；--auto 才真正自动同步
+# 可选：发布时自动跟随（普通提交不动任何宿主）
+bash sync-hosts.sh --install-hook --auto
 ```
 
+**同步目标是「最新发布标签 `v*`」**（默认 `--target release`）。这是刻意的设计：只有**影响宿主调用行为**
+的变更才推进标签，所以纯文档 / 记忆类提交**不会**让所有宿主无谓地重新 pin 一次 gitlink。
+引擎开发期想跟本机 HEAD 用 `--target local`，交接 / 多机 / CI 跟远端分支用 `--target origin`。
+（引擎仓尚无 `v*` 标签时会直接报错并给出指引，不会静默退回 HEAD。）
+
 - 名单落在 `.local/hosts.json`（**gitignored，本机私有**）；退出码：`0`=一致或成功、`2`=有落后/需人工介入、`1`=出错。
-- 目标版本默认取**本机引擎仓 HEAD**（引擎刚提交、还没 push 也能跟随）；加 `--from-origin` 改为跟 origin 默认分支。
-- 只处理「落后且工作区干净」的项目；`--dry-run` 可先看动作，`--allow-dirty` 才越过工作区检查。
+- 只有「落后且工作区干净」的项目会被改动；`--dry-run` 可先看动作，`--allow-dirty` 才越过工作区检查。
+- 若某宿主 pin 的 commit **比发布版本新**（`ahead-of-target`，例如开发期曾跟过本机 HEAD），默认不动——它已包含发布版本的行为。
+- 发布标签需 push（`git push origin vX.Y.Z`），否则他人 / 新克隆看不到。
 - 完整状态取值与参数见 `STATUS.md` §3.3。
 
 ---
