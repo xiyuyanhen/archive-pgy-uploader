@@ -3,14 +3,14 @@ document_type: "project-status"
 schema_version: "1.0"
 status_version: "1.0"
 project_name: "archive-pgy-uploader"
-project_version: "1.0.0"
+project_version: "1.1.0"
 last_calibrated: "2026-09-19"
 calibration_state: "baseline"
 authority: "本文件是本项目现状的唯一事实来源；与 README / AGENTS.md 冲突时以本文件为准"
 repository: "https://codeup.aliyun.com/61c852431ccc3a1faae0a9fa/scripts/archive-pgy-uploader.git"
 project_type: "code"
 positioning: "通用 Xcode Archive → 蒲公英(Pgyer) 自动上传引擎（多项目以 submodule 共享，配置与密钥按项目分离）"
-maturity: "已在 3 个 iOS 项目实际使用（xiyuScoreboard / xiyu_todo_list / xiyuWebBrowser）；治理基线自 v1.0.0 起"
+maturity: "已在 3 个 iOS 项目实际使用且接入方式已统一为 submodule（xiyuScoreboard / xiyu_todo_list / xiyuWebBrowser）；治理基线自 v1.0.0 起"
 entrypoints:
   - id: "cli-full"
     name: "archive_upload.sh — 全自动 Archive + 上传（AI / CI 主入口）"
@@ -24,6 +24,10 @@ entrypoints:
     name: "link-skill.sh — 把 skill/SKILL.md 注册到 WorkBuddy 技能扫描目录"
     path: "link-skill.sh"
     args: "[-g] [-f] [--project-root <path>]"
+  - id: "hosts-sync"
+    name: "sync-hosts.sh — 本机多宿主 gitlink 跟随同步（.local 名单模式，仅本机使用）"
+    path: "sync-hosts.sh"
+    args: "[--check|--apply|--list|--json] [--from-origin] [--only <names>] [--no-commit] [--allow-dirty] [--dry-run] [--add <name> <宿主路径> <子模块相对路径>] [--remove <name>] [--install-hook [--auto]] [--uninstall-hook]"
 change_control:
   entry_doc: "AGENTS.md"
   status_doc: "STATUS.md"
@@ -38,8 +42,6 @@ change_control:
 known_issues:
   - {id: "OPEN-001", severity: "medium", status: "by-design", summary: "Xcode 不热加载外部手改的共享 .xcscheme：注入 Post-actions 后未完全重开 Xcode 则不生效，表现为「不上传、无日志」"}
   - {id: "OPEN-002", severity: "low", status: "by-design", summary: "--notes 仅在 CLI/手动入口生效；Xcode Post-actions 入口根本不接收该参数，更新说明恒取自 PGYUploadHistory.json [0].updateDes"}
-  - {id: "OPEN-003", severity: "low", status: "open", summary: "jq 是引擎硬依赖（缺失即 exit 1），但 README 与 skill/SKILL.md 的前置条件均未登记"}
-  - {id: "OPEN-004", severity: "low", status: "open", summary: "README「架构」文件树未列出 archive_upload.sh / link-skill.sh / skill/，与仓库实际内容不一致"}
   - {id: "OPEN-005", severity: "medium", status: "by-design", summary: "子模块接入要求引擎 commit 已 push origin；仅本地 commit 会导致他人/新克隆解析不到 gitlink"}
 ---
 
@@ -54,11 +56,11 @@ known_issues:
 | 项 | 值 |
 | --- | --- |
 | 项目名称 | `archive-pgy-uploader` |
-| 项目版本 | 1.0.0 |
+| 项目版本 | 1.1.0 |
 | 状态文档版本 | 1.0 |
-| 最近校准 | 2026-09-19（`baseline`，建立本文件时的首次基线） |
+| 最近校准 | 2026-09-19（v1.1.0：新增多宿主同步器；`xiyuWebBrowser` 接入收敛为 submodule；关闭 `OPEN-003`/`OPEN-004`） |
 | 一句话定位 | 通用 Xcode Archive → 蒲公英(Pgyer) 自动上传引擎（多项目以 submodule 共享，配置与密钥按项目分离） |
-| 成熟度 | 已在 3 个 iOS 项目实际使用（xiyuScoreboard / xiyu_todo_list / xiyuWebBrowser）；治理基线自 v1.0.0 起 |
+| 成熟度 | 已在 3 个 iOS 项目实际使用且接入方式已统一为 submodule（xiyuScoreboard / xiyu_todo_list / xiyuWebBrowser）；治理基线自 v1.0.0 起 |
 | 远端仓库 | https://codeup.aliyun.com/61c852431ccc3a1faae0a9fa/scripts/archive-pgy-uploader.git |
 
 > **版本号语义**：本项目在此基线前**没有版本号体系**（无 git tag、脚本内无版本常量）。
@@ -81,12 +83,14 @@ known_issues:
 | C8 | 双触发防护：回溯祖先进程判定 `xcodebuild` 驱动，避免 CLI 与 Post-actions 重复上传 | `pgy_upload.sh` | 稳定 | 进程树硬判定，不依赖环境变量继承 |
 | C9 | 技能注册器：把 `skill/SKILL.md` 以相对软链注册到 WorkBuddy 扫描目录 | `link-skill.sh` | 稳定 | 支持项目级 / 用户级 |
 | C10 | 项目配置与控制文件模板 | `examples/` | 稳定 | `pgy_config.example.sh` / `PGYUploadHistory.example.json` |
+| C11 | 本机多宿主跟随同步：按 `.local/hosts.json` 名单体检 / 批量更新各宿主 gitlink（含可选 post-commit 自动跟随） | `sync-hosts.sh` | 稳定 | 仅本机使用，**不 push**；名单 gitignored（v1.1.0 新增） |
 
 ### 2.2 明确不做（范围外）
 
 - **不携带任何项目密钥或路径**：本仓库是共享引擎，禁止出现真实 `PGY_USER_KEY` / `PGY_API_KEY`、项目绝对路径、Bundle ID 真值。
 - **不管理签名与证书**：不做证书申请、profile 生成、team 配置；依赖项目自身签名能力（`xcodebuild -exportArchive` 的 `ExportOptions.plist` 由引擎生成）。
-- **不做 Git 操作**：不 commit / 不 push。子模块 gitlink 的 push（见 `OPEN-005`）由使用者本地完成（本机 sandbox 无 codeup 凭证）。
+- **不 push、不替使用者决定远端**：引擎本体不 push；`sync-hosts.sh` 仅在**宿主侧做本地 commit**（更新 gitlink），
+  push 一律由人决定。子模块 gitlink 的 push（见 `OPEN-005`）由使用者本地完成（本机 sandbox 无 codeup 凭证）。
 - **不扩展到其他分发平台**：仅蒲公英（`apiv2/app/upload`）；不做 TestFlight / Firebase / 自建分发。
 - **不覆盖非 iOS 平台**：假定产物是 `.xcarchive` / `.ipa`。
 - **不修改宿主 Xcode 工程**：不写 `project.pbxproj` / `.xcscheme`（Post-actions 由使用者在 Xcode 内手动添加或按文档注入）。
@@ -154,6 +158,39 @@ bash <引擎目录>/pgy_upload.sh --archive /path/to/Runner.xcarchive \
 | `--json` | stdout 输出结构化 JSON |
 | `-h` / `--help` | 打印头部注释 |
 
+### 3.3 本机多宿主同步（`sync-hosts.sh`，v1.1.0 新增）
+
+> **仅在本机使用，不进入宿主调用链**——宿主项目无需更新 gitlink 即可继续工作。
+> 名单文件 `.local/hosts.json`（**gitignored、本机私有**）：`{schema, engineRemote, hosts:[{name, path, submodule}]}`，
+> 可用 `PGY_SYNC_REGISTRY` 覆盖名单路径。
+
+| 参数 | 说明 |
+| --- | --- |
+| `--check`（默认） | 只读体检：逐宿主报告固定 commit / 落后多少 / 状态 / 是否脏 |
+| `--json` | stdout **单行 JSON**（`status` / `engine{path,head,target,source}` / `hosts[]` / `error`） |
+| `--list` | 打印本机名单 |
+| `--apply` | 对「状态 = outdated 且工作区干净」的宿主：`fetch` + `checkout --detach <目标>` + `git add <子模块路径>` + **本地** commit |
+| `--no-commit` | 只 checkout + stage，不 commit |
+| `--from-origin` | 目标取 `origin/HEAD` 指向的分支（**默认取本机 HEAD**，引擎刚提交、未 push 也能跟随） |
+| `--only <a,b>` | 只处理指定宿主 |
+| `--allow-dirty` | 越过「宿主工作区脏则跳过」的默认拒绝（gitlink 更新带 pathspec，不会卷入宿主其它改动） |
+| `--dry-run` | 只打印将执行的动作 |
+| `--add` / `--remove` | 维护本机名单（`--add <name> <宿主路径> <子模块相对路径>`） |
+| `--install-hook [--auto]` / `--uninstall-hook` | 装 / 卸本机 `post-commit` 钩子；默认**仅提示**，`--auto` 才自动同步；`PGY_SYNC_HOOK_DISABLE=1` 可临时禁用 |
+
+**状态取值**：`up-to-date` / `outdated` / `uncommitted-gitlink`（子模块已 add 但宿主从未 commit）/ `diverged` /
+`unknown-engine-commit` / `not-a-submodule` / `not-a-repo` / `missing`。
+除 `outdated` 外**都不会**被 `--apply` 自动处理，只给人工提示。
+
+**退出码**：`0` = 一致或全部成功；`2` = 存在落后或需人工介入（仅 `--check` 语义）；`1` = 执行出错。
+**前置依赖**：`jq`（硬依赖，启动即校验）、`git`。
+
+```bash
+bash sync-hosts.sh                          # 体检：谁落后了、落后多少
+bash sync-hosts.sh --apply                  # 一键把本机所有登记宿主推到引擎当前版本（仅本地 commit）
+bash sync-hosts.sh --install-hook --auto    # 可选：引擎仓每次提交后自动跟随
+```
+
 ## 4. 输入输出契约
 
 ### 4.1 输入契约
@@ -161,7 +198,7 @@ bash <引擎目录>/pgy_upload.sh --archive /path/to/Runner.xcarchive \
 | 形态 | 示例 | 解析结果 |
 | --- | --- | --- |
 | CLI 参数 | `--target "测试版本"` | 版本目标标签；决定是否上传 |
-| 项目配置 `pgy_config.sh`（shell，`source` 执行） | `PGY_USER_KEY=... ; TARGET_BUNDLE_ID=com.xiyu.browser` | 凭证 + 身份 + 控制文件路径（**该文件必须 gitignored**） |
+| 项目配置 `pgy_config.sh`（shell，`source` 执行） | `PGY_USER_KEY=... ; TARGET_BUNDLE_ID=com.example.app` | 凭证 + 身份 + 控制文件路径（**该文件必须 gitignored**） |
 | 环境变量 | `PGY_METHOD` / `PGY_MAX_WAIT` / `PGY_DEBUG_CHECK` / `PGY_VERSION_TARGET` / `PGY_UPDATE_DESCRIPTION` / `PGY_TEAM_ID` | 同配置项，可被 config / CLI 覆盖 |
 | 控制文件 `PGYUploadHistory.json` | `[{"version":"1.0.3.0","versionTarget":"测试版本","updateDes":"..."}]` | 取 `.[0]`；`versionTarget` 空 → 跳过上传；`updateDes` → 更新说明默认值 |
 | 归档 / 安装包 | `Runner.xcarchive`（或直接 `.ipa`） | 校验 `Info.plist` 中 Bundle ID 与 `TARGET_BUNDLE_ID` 一致 |
@@ -202,7 +239,7 @@ bash <引擎目录>/pgy_upload.sh --archive /path/to/Runner.xcarchive \
 | macOS | — | 依赖 `open`（监控页）与 `base64 -i`（二维码）等 Darwin 行为 |
 | `/bin/bash` | 3.2+ | 引擎按系统 bash 编写；`pgy_upload.sh` 用 `set -e`，`archive_upload.sh` 用 `set -euo pipefail` |
 | Xcode 命令行工具 | 需支持 `archive` / `-exportArchive` | `archive_upload.sh` 前置检查 `command -v xcodebuild` |
-| `jq` | 任意 | **硬依赖**：`pgy_upload.sh` 在依赖检查处缺失即 `exit 1`（`OPEN-003`） |
+| `jq` | 任意 | **硬依赖**：`pgy_upload.sh` 与 `sync-hosts.sh` 在依赖检查处缺失即 `exit 1`；README 与 `skill/SKILL.md` 已登记（v1.1.0 关闭 `OPEN-003`） |
 | `python3` | 3.x | 仅用于拼装 JSON（`archive_upload.sh`、`link-skill.sh` 同样依赖） |
 | `curl` | 任意 | 上传与二维码下载；连接超时 30s、总超时 600s |
 | 外部命令 | `awk`（`--help`）、`open`、`base64`、`xcodebuild -exportArchive` | 由 macOS 自带 |
@@ -240,7 +277,16 @@ bash <引擎目录>/pgy_upload.sh --archive /path/to/Runner.xcarchive \
 - 无签名能力的环境（无证书 / profile）。
 - 工程结构与 `Runner` scheme 假设不一致、且调用方未传 `--workspace` / `--scheme` / `--config`。
   - 已知适配范式（**已验证**）：XcodeGen 原生工程（如 `xiyuWebBrowser`，无 `Runner` scheme、无共享 scheme）
-    应采用「Build Phase `runOnlyWhenInstalling: true` 调 `pgy_upload.sh`」+「项目专属包装脚本预置 `--workspace *.xcodeproj --scheme <本scheme> --config pgy_config.sh`」，而非 Post-actions。
+    应采用「Build Phase `runOnlyWhenInstalling: true` 调 `pgy_upload.sh`」+「项目专属包装脚本预置
+    `--workspace *.xcodeproj --scheme <本scheme> --config <配置路径>`」，而非 Post-actions。
+  - **`xiyuWebBrowser` 的收敛后布局（v1.1.0，CR-003）**：仓库根 `pgy-archive-uploader/`（**git submodule**，不要再放密钥）+
+    兄弟目录 `pgy-archive-config/`（`pgy_config.sh` 已 gitignore、`PGYUploadHistory.json` 入库）+
+    宿主根 `archive_and_upload.sh`（项目专属包装，预置 `--workspace` / `--scheme` / `--config`）。
+    Build Phase 必须**显式**传 `--config "${PROJECT_DIR}/pgy-archive-config/pgy_config.sh"`——
+    一旦凭证移出引擎目录，引擎的目录探测就找不到它了。
+  - ⚠️ **XcodeGen 工程的额外坑**：`project.pbxproj` 可能早已与 `project.yml` 不同步（有人在 Xcode GUI 里改过设置而未回写 spec），
+    此时盲目 `xcodegen generate` 会**清空** `DEVELOPMENT_TEAM` 等设置。改 spec 后应先做「生成到临时目录 + diff 评估」，
+    必要时改为**就地替换** pbxproj 中目标片段。详见 `experience/LESSONS.md` L-008。
 - Android / Web / 桌面等其他分发目标。
 
 ## 7. 已知问题与开放问题
@@ -252,9 +298,14 @@ bash <引擎目录>/pgy_upload.sh --archive /path/to/Runner.xcarchive \
 | --- | --- | --- | --- | --- | --- | --- |
 | OPEN-001 | medium | Xcode 不热加载外部手改的共享 `.xcscheme` | 用文本/脚本注入 Post-actions，且未完全退出重开 Xcode | Archive 后不上传、`$TMPDIR` 无 `pgy_upload_*.log`（脚本根本没启动） | ① 优先走 CLI 入口 `archive_upload.sh`（不依赖 scheme 缓存）；② 在 Xcode `Edit Scheme → Archive → +` 手动添加；③ 接入后**完全退出 Xcode 重开** | by-design |
 | OPEN-002 | low | `--notes` 仅在 CLI/手动入口生效 | 走 Xcode Post-actions 入口时该参数未传入 | 更新说明恒取 `PGYUploadHistory.json [0].updateDes`，改 `--notes` 看似无效 | 改 JSON 的 `updateDes`，或改走 `archive_upload.sh` | by-design |
-| OPEN-003 | low | `jq` 为硬依赖但未在文档前置条件登记 | 新环境未装 `jq` | 引擎直接 `exit 1`，README / `skill/SKILL.md` 均未提示 | 接入前 `brew install jq`；待补入 README 与 SKILL.md 前置条件 | open |
-| OPEN-004 | low | README「架构」文件树与实际仓库内容不一致 | 阅读 README 判断仓库内容 | 文件树未列出 `archive_upload.sh` / `link-skill.sh` / `skill/`，易误以为只有 `pgy_upload.sh` | 以本文件 §3 与仓库实际为准；待补 README 文件树 | open |
 | OPEN-005 | medium | 子模块接入要求引擎 commit 已 push origin | 仅本地 commit 未 push 即在他处/新克隆使用 | 新克隆解析不到 gitlink commit，子模块拉取失败 | 引擎侧改动先 push 再由宿主更新 gitlink；本机 sandbox 无 codeup 凭证，需人工 push | by-design |
+
+**已关闭条目**（处置过程见 `changelog/CHANGES.md`，本表不再保留）：
+
+| ID | 关闭版本 | 关闭方式 |
+| --- | --- | --- |
+| OPEN-003 | v1.1.0 | `jq` 硬依赖补登进 `README.md` 与 `skill/SKILL.md`；`sync-hosts.sh` 亦启动即校验 |
+| OPEN-004 | v1.1.0 | README 文件树补全（`archive_upload.sh` / `link-skill.sh` / `skill/` / `sync-hosts.sh` / `.local/`） |
 
 ## 8. 变更管理协议（强制执行）
 
@@ -336,3 +387,15 @@ bash <引擎目录>/pgy_upload.sh --archive /path/to/Runner.xcarchive \
 | 4 | `.gitignore` 凭证规则缺口 | 原文件仅忽略 `pgy_config.sh` / `*.log` / `.DS_Store`，缺 `.env*` 规则 | 在保留既有规则前提下追加 `.env*`（保留 `!.env.example`）与编辑器目录，纳入 CR-001 影响范围 |
 | 5 | 工作区未提交改动 | 基线建立时存在上一会话遗留：`.workbuddy/memory/2026-08-0{6,7}.md` 追加、`skill/SKILL.md` 新增「Xcode GUI Archive Post-actions」章节 | 未回滚（属有效文档产出），随 CR-002 同批提交并在条目中注明 |
 | 6 | 全局 gitignore 陷阱 | 本机 `~/.gitignore_global` 含 `.gitignore` 一行 | 本项目 `.gitignore` **已在版本控制内**（`git ls-files` 可见），故 `git check-ignore` 不命中、规则正常入库，无需处理 |
+
+### 9.2 2026-09-19 v1.1.0 校准（多宿主接入收敛）
+
+| # | 事项 | 判定 | 处理方式 |
+| --- | --- | --- | --- |
+| 1 | 三宿主接入状态核查 | `xiyuScoreboard` = submodule（落后引擎 HEAD 4 个 commit）；`xiyu_todo_list` = submodule 但 gitlink 仅在索引（宿主从未 commit，落后 3 个）；`xiyuWebBrowser` = 文件复制且已漂移（缺治理目录、`skill/SKILL.md` 与引擎不一致） | 收敛 `xiyuWebBrowser` 为 submodule（CR-003）；另两处落后/未提交由 `sync-hosts.sh` 体检输出呈现，交由使用者决定何时同步（本轮未执行真实 `--apply`） |
+| 2 | `xiyuWebBrowser` 副本内含真实密钥 | `pgy-archive-uploader/pgy_config.sh` 的 `PGY_USER_KEY` / `PGY_API_KEY` 已填实（长度 32、非占位符），但该文件被副本 `.gitignore` 忽略、**未入库**（无泄漏） | 记为**结构缺口**而非安全事故：把凭证与控制文件移出引擎目录到兄弟目录 `pgy-archive-config/`，并对 `pgy_config.sh` `chmod 600` |
+| 3 | 引擎仓 `.git/hooks/` 目录不存在 | git 仓库允许没有 hooks 目录；直接写钩子文件会 `No such file or directory` | `sync-hosts.sh --install-hook` 改为先 `mkdir -p "$(dirname "$HOOK_FILE")"`；纳入经验条目 |
+| 4 | `project.yml` ↔ `project.pbxproj` 不同步 | 就地 `xcodegen generate`（2.46.0）除目标改动外还会清空 `DEVELOPMENT_TEAM`、改写 `LD_RUNPATH_SEARCH_PATHS` | 本轮**不重生成**，改为就地替换 pbxproj 中目标 `shellScript` 段（实测差异 1 增 1 删）；沉淀为 L-008 并在 §6.2 警示 |
+| 5 | 文档债 `OPEN-003` / `OPEN-004` | 与本版新增能力直接相关（新增入口同样硬依赖 `jq`；README 文件树还要再加一项） | 随 CR-004 一并关闭，见 §7「已关闭条目」 |
+| 6 | 引擎 HEAD 未 push origin | `origin/master` 停在 `155046c`，本机 HEAD 为 `6fadcb2` | 不自动 push（push 由使用者主导）；在 CR-003 与 `changelog/v1.1.0.md` 中显式标注 `OPEN-005` 的影响面 |
+| 7 | §4.1 输入契约示例含**真实 Bundle ID** | `TARGET_BUNDLE_ID=com.xiyu.browser` 出现在示例单元格，违反本仓 §2.2「不得写入真实 Bundle ID（示例一律用占位符）」；系基线建立时未剥离 | 校准修正为 `com.example.app`（仅文档，不改运行行为；同时纳入 CR-004 的影响范围） |

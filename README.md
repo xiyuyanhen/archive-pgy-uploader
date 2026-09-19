@@ -11,12 +11,18 @@
 
 ```
 中央仓库  archive-pgy-uploader/          ← 本仓库，多项目共享（git submodule 引用）
-├── pgy_upload.sh              # 引擎：只认 env / --config / --history
+├── archive_upload.sh          # CLI 全自动入口：xcodebuild archive + 上传
+├── pgy_upload.sh              # 底层引擎：导出 IPA、Bundle ID 校验、蒲公英上传、监控页
+├── link-skill.sh              # 把 skill/SKILL.md 注册到 WorkBuddy 技能扫描目录
+├── sync-hosts.sh              # 本机多宿主跟随同步器（.local 名单模式，仅本机用）
+├── skill/SKILL.md             # 分发给 AI 工具的技能入口文档
 ├── examples/
 │   ├── pgy_config.example.sh          # 项目配置模板
 │   └── PGYUploadHistory.example.json  # 控制文件模板
-├── .gitignore
-└── README.md
+├── changelog/ · experience/   # 变更流水（CR-NNN）/ 经验库（L-NNN）
+├── STATUS.md · AGENTS.md      # 实现真相（唯一事实来源）/ 跨工具入口
+├── .local/                    # 本机私有（gitignored）：宿主名单、钩子、备份
+└── .gitignore
 
 每个项目（如 xiyuScoreboard）：
 ├── ios/Scripts/archive-pgy-uploader/  → git submodule → 本仓库
@@ -25,6 +31,10 @@
 │   └── PGYUploadHistory.json  # 控制文件：是否触发 + 上传包信息
 └── Runner.xcodeproj/project.pbxproj   # Run Script
 ```
+
+> **工程不变量**：密钥与控制文件位于**引擎目录之外**（上例的 `archive-pgy-config/`）。
+> 引擎目录内只允许出现引擎自身的文件——把 `pgy_config.sh` 放进引擎目录会让所有宿主共用同一份
+> `TARGET_BUNDLE_ID`，Bundle ID 校验（防误传）随即失效。
 
 **Post-actions（Archive 成功后执行，推荐）**：
 
@@ -81,6 +91,15 @@ bash "${SRCROOT}/Scripts/archive-pgy-uploader/pgy_upload.sh" \
 
 ---
 
+## 前置依赖
+
+| 依赖 | 说明 |
+|---|---|
+| macOS + Xcode 命令行工具 | `xcodebuild`（`xcode-select --install`） |
+| **`jq`** | **硬依赖**：`pgy_upload.sh` / `sync-hosts.sh` 在依赖检查处缺失即 `exit 1`。`brew install jq` |
+| `python3` | 拼装 JSON 输出（`archive_upload.sh` / `link-skill.sh` / `sync-hosts.sh` 的部分路径） |
+| `curl` / `base64` / `open` | 上传、二维码、监控页（macOS 自带） |
+
 ## 项目接入步骤
 
 1. 在项目中添加 submodule：
@@ -118,6 +137,34 @@ bash "${SRCROOT}/Scripts/archive-pgy-uploader/pgy_upload.sh" \
 
 自动打开一个本地 HTML 监控页（`<meta refresh>` 自刷新，成功/失败转静态结果页），
 无需 HTTP 服务、无 CORS 问题。
+
+---
+
+## 多项目跟随同步（本机，`sync-hosts.sh`）
+
+引擎被多个项目以 submodule 共享后，「引擎迭代」与「宿主更新 gitlink」是两步操作，缺少机制时会自然滞后
+——本机实测曾同时存在三种状态：某项目落后 4 个 commit、某项目的 gitlink 只 add 未 commit、某项目干脆退化成文件复制。
+
+`sync-hosts.sh` 用一个**本机私有名单**把这件事压成一条命令：
+
+```bash
+# 1) 登记需要跟随的项目（每个项目一次）
+bash sync-hosts.sh --add xiyuScoreboard /path/to/xiyuScoreboard ios/Scripts/archive-pgy-uploader
+
+# 2) 随时体检：谁落后了、落后多少
+bash sync-hosts.sh                 # 加 --json 可输出单行 JSON 供 AI/CI 解析
+
+# 3) 一键同步：更新各宿主 gitlink 并本地 commit（不 push）
+bash sync-hosts.sh --apply
+
+# 可选：引擎仓每次提交后自动跟随
+bash sync-hosts.sh --install-hook --auto     # 默认仅提示；--auto 才真正自动同步
+```
+
+- 名单落在 `.local/hosts.json`（**gitignored，本机私有**）；退出码：`0`=一致或成功、`2`=有落后/需人工介入、`1`=出错。
+- 目标版本默认取**本机引擎仓 HEAD**（引擎刚提交、还没 push 也能跟随）；加 `--from-origin` 改为跟 origin 默认分支。
+- 只处理「落后且工作区干净」的项目；`--dry-run` 可先看动作，`--allow-dirty` 才越过工作区检查。
+- 完整状态取值与参数见 `STATUS.md` §3.3。
 
 ---
 

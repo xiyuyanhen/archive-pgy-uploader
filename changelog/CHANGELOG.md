@@ -22,6 +22,7 @@
 
 | 版本 | 日期 | 摘要 | 详情 |
 | --- | --- | --- | --- |
+| [v1.1.0](./v1.1.0.md) | 2026-09-19 | 新增本机多宿主同步器 `sync-hosts.sh` + `.local` 名单模式；同批收敛 `xiyuWebBrowser` 接入方式并关闭 OPEN-003 / OPEN-004（CR-004、CR-003） | 多宿主跟随同步 |
 | [v1.0.0](./v1.0.0.md) | 2026-09-19 | 建立项目治理基线：`STATUS.md` / `changelog` / `experience` / `AGENTS.md`（CR-001） | 治理基线建设 |
 
 > 更早版本：无（本项目自此基线启动）。
@@ -35,4 +36,12 @@
 
 | CR | 日期 | 摘要 | 原因 |
 | --- | --- | --- | --- |
+| CR-003 | 2026-09-19 | `xiyuWebBrowser` 的引擎接入由「文件复制」收敛为「git submodule」（凭证目录与引擎目录分离、包装脚本移出引擎目录、Build Phase 显式传 `--config`） | 规范性变更：统一共享机制、修复「密钥躺在引擎目录内」；**引擎实现零改动**，故不升版本 |
 | CR-002 | 2026-09-19 | 修复 `skill/SKILL.md` 中的 UTF-8 替换字符乱码（`测试\ufffd\ufffd员` → `测试人员`） | 校准修正，无运行行为变化 |
+
+## 已关闭的已知问题
+
+| ID | 关闭版本 | 关闭方式 |
+| --- | --- | --- |
+| OPEN-003 | v1.1.0 | `jq` 硬依赖补登进 `README.md` 与 `skill/SKILL.md` 的前置条件；`sync-hosts.sh` 亦在启动时校验 jq |
+| OPEN-004 | v1.1.0 | README 文件树补全（`archive_upload.sh` / `link-skill.sh` / `skill/` / `sync-hosts.sh` / `.local/`） |

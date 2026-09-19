@@ -1,6 +1,6 @@
 # 执行经验条目（累积式，禁止删除已验证内容）
 
-> 最后更新：2026-09-19 | 当前项目版本：1.0.0
+> 最后更新：2026-09-19 | 当前项目版本：1.1.0
 
 > 条目格式见文末「条目写作格式」。L-001 ~ L-004 为**基线建立时回填**的历史经验
 > （依据：仓库 git 提交历史 + 项目工作记忆 `.workbuddy/memory/2026-08-0{6,7,8}.md`），
@@ -164,6 +164,157 @@ bash -n broken.sh           # → exit 2 + 报错「未预期的文件结束符�
 
 **推广**：同类"多文件只认第一个"的命令还有 `sh -n`；校验多个 shell 脚本应统一走循环。
 **保留的既有经验**：无替代关系；本条为新增的校验方法约束。
+
+---
+
+## L-006 — `read` 遇到 EOF 会**清空**它赋值的变量，「while read 循环结束后再用这些变量」必然拿到空值
+
+| 字段 | 值 |
+| --- | --- |
+| **状态** | `verified` |
+| **引入版本** | 1.1.0 |
+| **关联执行** | `run-20260919-hosts-sync-and-browser-consolidation`（本会话实测复现） |
+| **场景** | 用 `while IFS=$'\t' read -r a b c; do ...; done < <(...)` 逐行处理数据，循环里把值写进文件，**循环之后再引用 `$c`**（例如在另一个循环里拼路径、拼提示） |
+
+**问题**：循环里读到的值是对的（写进文件的每行都正确），但循环结束后 `$c` 是**空字符串**。
+症状极具误导性：数据文件内容完全正确，却在「循环外用到的那个变量」上凭空丢了值——
+本会话第一版 `sync-hosts.sh` 就因此在干跑提示里打出了 `.../xiyuScoreboard/ fetch`（子模块路径缺失），
+看起来像"变量名写错/函数作用域问题"，实际是**循环变量的生命周期**问题。
+
+**根因**：`read` 在**读到 EOF（返回非零）时会把它的目标变量置为空串**。
+循环自然结束的那一次 `read` 正是读到 EOF 的那一次，于是循环退出来后这些变量都已被清空。
+注意：这与 bash 版本无关（本机 bash 5.3.15 与系统 bash 3.2.57 **表现一致**），也不是子 shell 问题
+（循环体内用普通赋值设置的计数器**不会**被清空——这恰恰是排除"子 shell"猜想的判别依据）。
+
+**解法**：循环外需要的数据，要么在循环内就**落盘/落变量**，要么在循环内用**普通赋值**搬运。
+本项目的落地做法：把每个宿主的全部字段写成一张 TSV（`rows.tsv`），后续所有阶段都从这个文件重读，
+不再依赖任何"上一个循环残留的变量"。
+
+```bash
+# ✗ 错：循环外出去了，$sub 已是空串
+while IFS=$'\t' read -r name hpath sub; do
+    printf '%s\n' ... >> "$ROWS"
+done < <(jq -r ... )
+while IFS=$'\t' read -r name hpath x; do
+    git -C "$hpath/$sub" ...      # $sub 为 ""
+done < "$ROWS"
+
+# ✓ 对：需要什么就自己读进来
+while IFS=$'\t' read -r name hpath sub; do
+    git -C "$hpath/$sub" ...
+done < "$ROWS"
+```
+
+**实测证据**（本会话复现）：
+
+```bash
+printf 'x\ty\tSUB1\n' > /tmp/rt.txt
+
+# A) 循环体 break（不触发 EOF 读取）→ 变量保留
+while IFS=$'\t' read -r a b c; do break; done < /tmp/rt.txt
+echo "c=[$c]"        # → c=[SUB1]
+
+# B) 循环自然结束（末次 read 读到 EOF）→ 变量被清空
+while IFS=$'\t' read -r a b c; do :; done < /tmp/rt.txt
+echo "c=[$c]"        # → c=[]
+
+# C) 机制直证：成功读取后，再来一次立即 EOF 的 read，变量立刻被清空
+while IFS=$'\t' read -r a b c; do break; done < /tmp/rt.txt
+echo "c=[$c]"                      # → c=[SUB1]
+read -r a b c < /dev/null || true
+echo "c=[$c]"                      # → c=[]（被 EOF 清空）
+
+# D) 对照：普通赋值不受影响（用于排除"子 shell"误判）
+n=0; while IFS=$'\t' read -r a b c; do n=$((n+1)); done < /tmp/rt.txt
+echo "n=$n"                        # → n=1（保留）
+```
+
+**推广**：同类"循环结束即失效"的还有 `while read` 配合 `break`/`return` 提前退出后再引用变量的场景；
+需要跨阶段传递的数据一律走文件或显式赋值。
+
+**保留的既有经验**：无替代关系；本条与 L-002（函数返回值陷阱）同属"shell 隐式语义导致的静默丢数据"家族。
+
+---
+
+## L-007 — jq 的 `tonumber?` 在失败时产生 **empty**（不是 null），会让整条记录被 `map` 静默丢弃
+
+| 字段 | 值 |
+| --- | --- |
+| **状态** | `verified` |
+| **引入版本** | 1.1.0 |
+| **关联执行** | `run-20260919-hosts-sync-and-browser-consolidation`（本会话实测复现） |
+| **场景** | 用 `jq -R -s` 把 TSV 转成 JSON 数组时，对可能非数字的字段做类型转换，如 `behind:(.[3]|tonumber?)` |
+
+**问题**：转出来的 JSON **条目数比输入少**，且**不报错、不警告**。
+本会话第一版 `sync-hosts.sh --json` 输出 3 个宿主里的 2 个，被丢掉的恰好是字段值为 `-`（非数字）的那条。
+"少一条又不报错"是最危险的一类 bug——下游（AI/CI）会以为世界只有两个宿主。
+
+**根因**：jq 的 `EXP?`（`try EXP`）在出错时产生 **`empty`**，而不是 `null`。
+当对象字面量中的某个字段取值是 `empty` 时，**整个对象表达式也变成 `empty`**，
+于是 `map(...)` 就把这条记录当"没有输出"丢掉了。
+
+**解法**：不要让失败路径产生 `empty`。显式判定再转换，或用 `//` 兜底为 `null`：
+
+```jq
+# ✗ 危险：失败 → empty → 整条记录消失
+{name:.[0], behind:(.[3]|tonumber?)}
+
+# ✓ 显式判定
+{name:.[0], behind:(if (.[3] | test("^[0-9]+$")) then (.[3]|tonumber) else null end)}
+
+# ✓ 或利用 // 会把 empty 视为"无有效值"而取右值
+{name:.[0], behind:((.[3]|tonumber?) // null)}
+```
+
+**落地约束**：凡"TSV/行文本 → JSON"的转换，验证方式里必须**断言条目数**，
+例如 `jq -e '.hosts | length == <期望值>'`——只校验"JSON 合法"是抓不到本条的。
+
+**保留的既有经验**：无替代关系；本条与 L-006 同属"静默丢数据"家族，且都靠"断言条数/对比输入输出数量"才能暴露。
+
+---
+
+## L-008 — XcodeGen 工程的 `project.pbxproj` 与 `project.yml` 可能早已不同步：改 spec 后**不要盲目** `xcodegen generate`
+
+| 字段 | 值 |
+| --- | --- |
+| **状态** | `verified` |
+| **引入版本** | 1.1.0 |
+| **关联执行** | `run-20260919-hosts-sync-and-browser-consolidation`（本会话在 `xiyuWebBrowser` 实测） |
+| **场景** | 需要修改 XcodeGen 工程（`project.yml`）里的某个 Build Phase / 设置，按"spec 是唯一真相源"的直觉执行 `xcodegen generate` 就地重生成 |
+
+**问题**：重生成会**顺带抹掉** `project.yml` 里没写、但 `pbxproj` 里真实存在的手工设置。
+本会话实测 `xiyuWebBrowser`：`xcodegen generate`（2.46.0）除了目标改动外，还产生了三处无关改动——
+1. `DEVELOPMENT_TEAM = T9P67M8S4K` → **`""`**（Xcode 里设过的签名 Team 被清空，直接破坏签名能力）；
+2. `LD_RUNPATH_SEARCH_PATHS` 由数组形式被改写为空格连接的单串（语义近似但仍属噪声改动）；
+3. 产物引用的 `explicitFileType` → `lastKnownFileType`（xcodegen 版本差异）。
+
+**根因**：`pbxproj` 是**生成物**，但历史上有人直接在 Xcode GUI 里改过设置（如 Development Team），
+这些改动**不会回写** `project.yml`。于是 spec 与生成物之间已经漂移，
+"重新生成"等于用 spec（较旧/较薄）覆盖生成物（较新/较厚）→ 丢失 GUI 侧设置。
+
+**解法**：改 XcodeGen 工程前先做一次"无害探测"——
+
+```bash
+# 1) 先看 spec 与现有生成物的真实差距（不改动工作区）
+xcodegen generate --spec project.yml --project /tmp/xcodegen-check
+#    ⚠️ 注意：换输出目录会让 group 的 path 变成相对路径（如 ../../Users/...），
+#       比对这些差异时要能识别出这类"生成位置造成的假差异"
+
+# 2) 差距里出现签名/Team/搜索路径等既有设置 → 判定为"spec 与 pbxproj 已不同步"
+
+# 3) 若本轮只需改一处，改用"就地替换"最小化风险：还原 pbxproj 后，
+#    只替换目标那一段（例如某个 Build Phase 的 shellScript 行），并复核差异行数
+plutil -lint <工程>.xcodeproj/project.pbxproj   # 结构仍合法
+git diff --numstat <工程>.xcodeproj/project.pbxproj   # 期望：极小（本项目实测 1 增 1 删）
+```
+
+同时**必须**在宿主侧登记这个"spec ↔ pbxproj 不同步"的事实，否则下一个人重生成时会踩同一颗雷。
+
+**推广**：任何"声明式 spec + 生成物入库"的组合（XcodeGen / Tuist / 各类 codegen）都有这个风险。
+判据很简单：**生成物是否被人手工编辑过**——若 `git log` 显示生成物有非生成来源的改动，就不能盲目重生成。
+
+**保留的既有经验**：无替代关系；本条是宿主工程侧的坑，与 `OPEN-001`（Xcode 不热加载共享 scheme）同属
+"改宿主 Xcode 接线前必须先验证"的范畴（`STATUS.md` §6.2 / §7）。
 
 ---
 

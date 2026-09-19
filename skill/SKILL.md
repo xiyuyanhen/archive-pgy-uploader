@@ -18,9 +18,11 @@ description: >-
 
 ## 前置条件
 - macOS + Xcode 命令行工具（`xcodebuild` 可用）
+- **`jq`（硬依赖）**：`pgy_upload.sh` 在依赖检查处缺失即 `exit 1`；`brew install jq`
 - 有效签名：development 证书 + 自动签名，或对应 provisioning profile
 - 已引入 `archive-pgy-uploader` 子模块，且项目配置目录已提供 `pgy_config.sh`
   （含 `PGY_USER_KEY` / `PGY_API_KEY`，gitignored，本地维护）
+  —— 配置**必须**放在子模块目录之外（如 `ios/Scripts/archive-pgy-config/`）
 
 ## 调用方式
 统一入口脚本 `archive_upload.sh`（已做参数透传与结构化输出），位于子模块目录内：
@@ -31,6 +33,10 @@ bash <子模块目录>/archive_upload.sh [参数]
 
 `<子模块目录>` 即 `archive-pgy-uploader` 子模块根，项目内常见路径如
 `ios/Scripts/archive-pgy-uploader/archive_upload.sh`（按实际子模块位置调整）。
+
+> **优先用项目专属包装脚本**：部分项目在仓库根提供了薄包装（如 `xiyuWebBrowser` 的
+> `archive_and_upload.sh`），已预置该工程的 `--workspace` / `--scheme` / `--config`。
+> 存在时优先调用它（参数与引擎一致），可省去逐个传参。
 
 > 工程结构假设：脚本默认 `--scheme Runner`、workspace 为 `Runner.xcworkspace`（CocoaPods 工程）。
 > 若你的工程 scheme 不叫 `Runner`、或纯 `.xcodeproj`（无 CocoaPods），请通过

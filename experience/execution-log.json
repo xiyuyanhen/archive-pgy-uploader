@@ -80,6 +80,53 @@
       },
       "changes": [],
       "open_issues_opened": []
+    },
+    {
+      "run_id": "run-20260919-hosts-sync-and-browser-consolidation",
+      "date": "2026-09-19",
+      "project_version": "1.1.0",
+      "task": "多宿主共享方式评估与收敛：xiyuWebBrowser 复制 → submodule；新增 sync-hosts.sh + .local 本机名单模式",
+      "outcome": "success",
+      "summary": "先评估「submodule vs 软链共享」优劣（结论：软链属暴露层、submodule 属锁定层，现有分层正确，不建议改软链），随后落地两件事：① 把已漂移的 xiyuWebBrowser 接入由文件复制收敛为 submodule，凭证目录与引擎目录分离；② 新增本机名单（.local/hosts.json）+ sync-hosts.sh，把「引擎迭代后各宿主跟随更新 gitlink」压成一条命令并可选自动执行。",
+      "findings": [
+        "三宿主实测跑出三种状态：xiyuScoreboard 落后 4 个 commit；xiyu_todo_list 的 gitlink 只存在于索引（宿主从未 commit，落后 3 个）；xiyuWebBrowser 退化为文件复制并漂移（缺 STATUS/changelog/experience、skill/SKILL.md 与引擎不一致）。结论：机制没坏，缺的是低成本操作面。",
+        "xiyuWebBrowser 复制目录内含真实 pgy_config.sh（PGY_USER_KEY/PGY_API_KEY 长度 32、非占位符）与 PGYUploadHistory.json —— 密钥躺在引擎目录内，破坏「引擎目录零密钥」不变量。核查确认该文件被副本 .gitignore 忽略、未入库（无泄漏），但结构必须纠正。",
+        "全分支实测 jq 的 tonumber? 失败产生 empty（非 null），导致 map 静默丢弃整条记录：--json 首版只输出 3 个宿主里的 2 个且不报错 → 沉淀为 L-007，并把「断言条目数」写进验证方式。",
+        "实测 while read 循环自然结束后 read 赋值的变量被清空（read 遇 EOF 置空；bash 5.3.15 与 3.2.57 表现一致，且普通赋值不受影响，可据此排除子 shell 猜想）→ 首版 sync-hosts.sh 干跑提示里子模块路径为空，沉淀为 L-006。",
+        "xiyuWebBrowser 上 xcodegen 2.46.0 就地重生成会清空 DEVELOPMENT_TEAM=T9P67M8S4K 并改写 LD_RUNPATH_SEARCH_PATHS → 判定 project.yml 与 pbxproj 早已不同步，改用「就地替换 pbxproj 中该 shellScript 行」（实测差异 1 增 1 删）并沉淀为 L-008。",
+        "bash 3.2 在多字节字符前会吞掉变量名：\"$VAR（中文\" 被解析为变量名 VAR（中文 → unbound variable。修法：变量后紧跟 CJK 时一律写 ${VAR}（本会话用脚本批量修正脚本内 13 处）。",
+        "引擎仓 .git 下不存在 hooks 目录（git 仓库可无 hooks/），写钩子前必须先 mkdir -p $(dirname $HOOK)。",
+        "核查结论（与上一轮评估一致）：软链共享在「单人 + 单机 + 高频迭代」下更省事，但缺失版本锚点/并行版本/可复现性；本方案保留 submodule 锁定层 + 本机名单同步层，属折中而非替代。"
+      ],
+      "artifacts": {
+        "files": [
+          "sync-hosts.sh",
+          ".local/hosts.json",
+          ".gitignore",
+          "STATUS.md",
+          "README.md",
+          "skill/SKILL.md",
+          "changelog/CHANGES.md",
+          "changelog/CHANGELOG.md",
+          "changelog/v1.1.0.md",
+          "experience/LESSONS.md",
+          "experience/execution-log.json"
+        ],
+        "external": {
+          "host_changes": [
+            "xiyuWebBrowser（宿主仓本地 commit c6c20b5）：pgy-archive-uploader 复制目录 → git submodule(gitlink 6fadcb2)；新增 pgy-archive-config/（pgy_config.sh gitignored+chmod 600、PGYUploadHistory.json 入库）；archive_and_upload.sh 移到宿主根；project.yml + pbxproj 显式传 --config；.gitignore 补规则",
+            "xiyuWebBrowser 备份：~/xiyuyanhen/backups/2026-09-19-xiyuWebBrowser-pgy-vendored/（逐字节一致）；原目录移入 ~/.Trash/xiyuWebBrowser-pgy-archive-uploader-20260919"
+          ],
+          "not_done": [
+            "未对任何宿主执行真实 --apply（仅 --dry-run），宿主 gitlink 仍待使用者决定后同步",
+            "引擎 commit 6fadcb2 未 push origin（origin/master 停在 155046c）→ xiyuWebBrowser 子模块在其它机器无法初始化（OPEN-005）"
+          ]
+        }
+      },
+      "changes": ["CR-003", "CR-004"],
+      "open_issues_opened": [],
+      "open_issues_closed": ["OPEN-003", "OPEN-004"],
+      "lessons_added": ["L-006", "L-007", "L-008"]
     }
   ]
 }

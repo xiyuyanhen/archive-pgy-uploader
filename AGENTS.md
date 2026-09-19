@@ -21,6 +21,7 @@
 | --- | --- |
 | 现在做到哪了、能做什么 | `STATUS.md` §1 状态概览 + §2 目标与范围 |
 | 怎么跑起来 | `STATUS.md` §3 入口与调用方式 |
+| 引擎迭代后怎么让各宿主跟上 | `bash sync-hosts.sh --check`（体检）→ `--apply`（同步）；详见 `STATUS.md` §3.3 |
 | 输入输出长什么样 | `STATUS.md` §4 契约 |
 | 有什么坑 / 哪些还没做 | `STATUS.md` §7 已知问题 |
 | 最近改了什么、为什么 | `changelog/CHANGES.md` |
@@ -69,6 +70,8 @@
 | `archive_upload.sh` | 全自动 Archive + 上传的 CLI 入口（AI / CI 主入口） |
 | `pgy_upload.sh` | 底层引擎：导出 IPA、Bundle ID 校验、蒲公英上传、监控页、JSON 输出 |
 | `link-skill.sh` | 把 `skill/SKILL.md` 软链注册到 WorkBuddy 技能扫描目录 |
+| `sync-hosts.sh` | 本机多宿主跟随同步器：按 `.local/hosts.json` 体检 / 批量更新各宿主 gitlink（仅本机使用，**不 push**） |
+| `.local/` | **本机私有目录（gitignored，不入库）**：宿主名单 `hosts.json`、`post-commit` 钩子、临时备份 |
 | `skill/SKILL.md` | 分发给 AI 工具的技能入口文档（**功能入口**，与 `AGENTS.md` 治理入口职责不同，勿互相覆盖） |
 | `examples/` | `pgy_config.example.sh` / `PGYUploadHistory.example.json` 模板 |
 | `README.md` | 面向使用者的接入说明（非事实来源，冲突时以 `STATUS.md` 为准） |
