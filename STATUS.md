@@ -478,3 +478,12 @@ bash sync-hosts.sh --install-hook --auto    # 可选：发布时自动跟随（�
 | 2 | **`--apply` 存在 tab 折叠导致的整行串列**（既有缺陷，被新状态照出） | rows.tsv 用 `\t` 分隔；`pinned` 为空时写出连续两个 `\t`，而 **tab 属 IFS 空白字符 → bash 的 `read` 把连续分隔符折叠成一个**（jq 的 `split("\t")` 不折叠，故二者行为不同）。结果：`--apply` 循环里其后所有列左移一格 → `state` 变 `N`、ACTION 变 `skip:<dirty值>`，并原样写入 JSON `hosts[]` | 所有列一律写非空占位符（`${pinned:--}`），并在该 printf 上方加注释说明「为何不能有空列」；实测 `not-a-submodule` 宿主在修复前后 ACTION 由 `skip:N` 变为 `skip:not-a-submodule` |
 | 3 | 自动补登的**安全边界** | 若不加限制，`git add` 会把「随手放进目录的 vendored 副本 / 嵌套仓库」也补登成 gitlink——而该 commit 通常不在引擎仓，补登完立刻是 `unknown-engine-commit`，制造假象 | 新增 `is_submodule_checkout()`：仅当子模块的 git dir 落在宿主 `.git/modules/` 下才认定可补登；否则维持 `not-a-submodule` 并提示走 `git submodule add`。反向对照夹具（vendored 副本）已实测不被登记 |
 | 4 | `uncommitted-gitlink` 是否也自动提交 | 该状态是「人已 `git add`、只差 commit」，可能正处于人工编辑中间态 | **刻意不自动处理**，维持人工提示（不猜测人的意图） |
+| 5 | 发布后对使用者陈述「远端一个标签都没有」 | **错误结论**：依据是 `git ls-remote --tags origin 2>/dev/null` 的空输出，而该命令实际**退出码 128**（`could not read Username` —— sandbox 内 keychain 不可用且无交互终端）。**空输出是「查询失败」而非「结果为无」**，结论方向相反且未经核实 | 记 CR-008（无版本变更）；新增 L-014 固化判据「`rc=0 且空` 才等于确实没有」；同步订正记忆中的该条陈述；并澄清「push 分支会更新远程跟踪引用（可本地反推）、**push 标签不产生任何本地引用（只能查远端）**」。脚本已核实不依赖网络，故不受影响 |
+
+### 9.6 2026-09-19 校准（CR-008：远端标签状态的判定依据）
+
+| # | 事项 | 判定 | 处理方式 |
+| --- | --- | --- | --- |
+| 1 | 「远端没有标签」的结论未经核实 | 该结论由**查询失败**（`ls-remote` rc=128）的空输出推出，属「把失败误读成判断依据」（同族：L-009）。它让结论**反向**，且**看起来证据充分**（命令跑了、输出为空、无可见报错） | 订正记忆中的陈述为「**无法判定**，需使用者在有凭证的终端核实」；新增 L-014 记录判据与推广（判定性命令禁止 `2>/dev/null`） |
+| 2 | 提交是否已 push | **是**：`origin/master == HEAD == 9d3aa18`，且 reflog 最新一条为 `9d3aa18 refs/remotes/origin/master@{0}: update by push`。此前记忆里「领先 1 个提交」已过期 | 更新记忆为「已 push」；并在 L-014 中记录「分支状态可本地反推、标签状态不可」 |
+| 3 | 脚本是否受同类风险影响 | **否**：已核实 `sync-hosts.sh` 无 `ls-remote` / `fetch origin`，`--apply` 只从本地 `$ENGINE_DIR` 取对象，全程离线可用 | 无需改动；但须明确「工具也不会替你确认标签是否已 push」（`OPEN-005`） |

@@ -525,6 +525,74 @@ printf '%s\t%s\t%s\t%s\t…\n' \
 
 ---
 
+## L-014 — 判定「远端没有 X」之前必须先看**退出码**：`2>/dev/null` 会把「命令失败」伪装成「空结果」
+
+| 字段 | 值 |
+| --- | --- |
+| **状态** | `verified` |
+| **引入版本** | 无（方法论校准，2026-09-19 记入） |
+| **关联执行** | `run-20260919-remote-tag-verification-calibration` |
+| **场景** | 用一条查询命令的**空输出**去证明「远端不存在某物」（标签 / 分支 / 记录），且把 stderr 丢掉了 |
+
+**事实（本机实测）**：本轮曾用
+
+```bash
+git ls-remote --tags origin 2>/dev/null | awk -F/ '{print $NF}' | grep -v '\^{}'
+```
+
+得到**空**输出，据此对使用者的结论是「远端一个标签都没有」。实际情况：
+
+```bash
+git ls-remote --tags origin
+# 退出码 = 128
+# stderr: fatal: could not read Username for 'https://codeup.aliyun.com': Device not configured
+```
+
+即**查询本身失败了**——sandbox 内 `credential.helper=osxkeychain` 无法解锁钥匙串、也没有交互终端
+可提示输入。空输出是「没查成」，不是「没有」。
+
+**判据（必须三个一起看）**：
+
+| 退出码 | stdout | 结论 |
+| --- | --- | --- |
+| `0` | 有 `refs/tags/v*` | 标签**已 push** |
+| `0` | **空** | 标签**确实不存在** ← 只有这一行才能下「没有」的结论 |
+| `≠0` | 空 | **无法判定**（查询失败），必须排查原因，禁止当成「没有」 |
+
+**为什么危险**：这是「失败被误读成判断依据」的典型——它让结论**反向**（把「没查到」说成「确认没有」），
+而且**看起来证据充分**（命令跑了、输出为空、没有报错可见）。本仓已有同族条目：
+L-009（`pipefail` 下 `grep -q` 让条件反向判假）。两者都是「工具层行为把失败/成功翻译错了」。
+
+**另外：本地无法反推远端标签状态。** `git push` 会更新远程**跟踪引用**（`refs/remotes/origin/<branch>`，
+reflog 里显示为 `update by push`），但 **push 标签不会产生任何本地引用**。
+所以「分支推没推」可以本地查（`git rev-list --count origin/<branch>..HEAD` + reflog），
+「标签推没推」**只能查远端**。本机沙箱查不了 → 这类结论必须交回有凭证的终端。
+
+**解法**：
+
+```bash
+# 1) 判定性查询：不丢 stderr，先判退出码
+if ! out="$(git ls-remote --tags origin 2>err.txt)"; then
+    echo "查询失败，无法判定：$(cat err.txt)"; exit 1
+fi
+[ -n "$out" ] || echo "远端确实没有任何标签"
+
+# 2) 使用者自查（有凭证的终端）
+cd ~/xiyuyanhen/workProject/archive-pgy-uploader
+git ls-remote --tags origin; echo "rc=$?"       # 看 rc 与是否出现 refs/tags/v1.1.0 等
+```
+
+**推广**：
+1. **判定性**命令（用来下结论的）**一律不许 `2>/dev/null`**；`2>/dev/null` 只允许用在
+   「失败有明确无害默认值」的地方（例如 `git rev-parse --quiet x 2>/dev/null || true` 取可选值）。
+2. 见到「空结果」先问一句：**这是「查到了、为空」，还是「没查成」？** 两者必须由退出码区分。
+3. 沙箱 / 非交互环境的凭证限制要**在写结论前**就想清楚：`ls-remote` / `push` / `clone` 私有远端
+   在此环境下大概率不可用，凡结论依赖它们，必须声明「未能核实」而不是给出确定答案。
+4. 本仓 `sync-hosts.sh` 已核实**不依赖网络**（无 `ls-remote` / `fetch origin`；`--apply` 只从本地
+   `$ENGINE_DIR` 取对象），故不受此条影响。反过来说：**工具也不会替你确认标签是否已 push**（`OPEN-005`）。
+
+---
+
 ## L-NNN — <一句话标题>
 
 | 字段 | 值 |

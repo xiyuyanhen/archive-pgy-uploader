@@ -27,6 +27,47 @@
 
 ---
 
+## CR-008 — 校准：订正「远端无标签」的错误结论，并沉淀「空结果 vs 查询失败」判据（L-014）
+
+- **变更时间**：2026-09-19
+- **变更类型**：校准修正（**无版本变更**）
+- **关联版本**：无
+- **变更原因**：CR-007 发布后，我向使用者陈述「远端一个标签都没有」，依据是
+  `git ls-remote --tags origin 2>/dev/null` 的**空输出**。使用者追问判定依据后复核发现：该命令**退出码 128**，
+  stderr 为 `fatal: could not read Username for 'https://codeup.aliyun.com': Device not configured`
+  （sandbox 内 `credential.helper=osxkeychain` 无法解锁、也无交互终端）。**空输出是「查询失败」，不是「结果为无」**
+  —— 结论**反向**且未经核实。同时澄清：`origin/master` 的 reflog 显示
+  `9d3aa18 … update by push`，提交**已 push**（此前记的「领先 1 个提交」已过期）。
+
+**变更前后差异**
+
+| 项 | 变更前（错误陈述） | 变更后（校准） |
+|----|--------|--------|
+| 远端标签状态 | 「远端一个标签都没有」 | **无法判定**——本机沙箱无 codeup 凭证，`ls-remote` 退出码 128。需使用者在有凭证的终端执行 `git ls-remote --tags origin; echo rc=$?` |
+| 判定依据 | 命令的空输出 | 空输出 + 退出码**共同**判定：`rc=0 且空` 才是「确实没有」；`rc≠0` 一律记为「无法判定」 |
+| 提交推送状态 | 「领先 `origin/master` 1 个提交」 | 已 push（`origin/master == HEAD == 9d3aa18`，领先 0） |
+| 本地可否反推标签 | 未说明 | 明确：`push` 会更新远程**跟踪引用**（分支可本地反推，reflog 记 `update by push`），但 **push 标签不产生任何本地引用** → 标签状态只可能查远端 |
+
+**影响范围**：仅文档/记忆——`experience/LESSONS.md`（新增 L-014）、`STATUS.md`（§9.6）、
+`changelog/CHANGES.md`、`experience/execution-log.json`、`.workbuddy/memory/`。
+**脚本零改动**（已核实 `sync-hosts.sh` 不含 `ls-remote` / `fetch origin`，不依赖网络）。
+
+**兼容性说明**：无行为变化，**不升版本、不打标签**（宿主仍 pin `v1.3.0`）。
+
+**验证方式**：
+
+```bash
+# 复现「空输出 ≠ 没有」：
+git ls-remote --tags origin 2>err.txt; echo "rc=$?"; cat err.txt   # rc=128 + could not read Username
+# 确认脚本无网络依赖：
+grep -n "ls-remote\|fetch origin" sync-hosts.sh || echo "无（脚本不依赖网络）"
+# 确认提交已 push（本地可查）：
+git reflog show origin/master | head -3      # 最新一条应为 update by push
+git rev-list --left-right --count origin/master...HEAD   # 0  0
+```
+
+---
+
 ## CR-007 — `--apply` 支持自动补登「半套接入」（`unregistered-gitlink`）；修复 tab 折叠导致的整行串列
 
 - **变更时间**：2026-09-19

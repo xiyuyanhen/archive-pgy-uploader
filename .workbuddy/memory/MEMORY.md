@@ -82,3 +82,17 @@
   而 `jq` 的 `split("\t")` 与 `awk -F'\t'` **都保留**空字段 → 同一份数据两套解析器结果不同（见 L-012）。
 - **涉及 `read` 的代码要单独测**：`read` 的两个反直觉行为已坑过两次 —— 遇 EOF 清空目标变量（L-006）、
   IFS 空白折叠连续分隔符（L-012）。
+- **判定性命令禁止 `2>/dev/null`**（L-014）：`2>/dev/null` 会把**命令失败**伪装成**空结果**。
+  「空输出」有两种含义，必须用退出码区分：`rc=0 且空` = 确实没有；`rc≠0` = **无法判定**。
+  `2>/dev/null` 只允许用在「失败有明确无害默认值」处（如 `rev-parse --quiet x 2>/dev/null || true`）。
+
+## 远端状态的可核实性（2026-09-19 校准，CR-008）
+- **本机沙箱无法核实任何远端状态**：`ls-remote` / `push` / 私有远端 `clone` 都需要凭证，
+  而 sandbox 里 `credential.helper=osxkeychain` 无法解锁、也没有交互终端 →
+  报错形态是 `fatal: could not read Username for 'https://codeup.aliyun.com': Device not configured`（退出码 128）。
+  **凡结论依赖远端查询，必须声明「未能核实」并交回用户在有凭证的终端执行**，不得当成「确实没有」。
+- **分支状态可本地反推，标签状态不可**：
+  - `git push` 会更新远程跟踪引用 → 分支可用 `git rev-list --left-right --count origin/<b>...HEAD`
+    与 `git reflog show origin/<b>`（`update by push`）本地判断。
+  - **push 标签不产生任何本地引用** → 「标签推没推」只能查远端。
+- 这类会随时间变化的事实（推送状态、远端引用）写进记忆时**必须带核实方式与时间点**，否则很快变成误导。
