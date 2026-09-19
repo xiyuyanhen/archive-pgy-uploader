@@ -240,7 +240,7 @@ cmd_remove() {
 
 # ---------- 发布标签（--tag） ----------
 # 发布标签是各宿主 gitlink 的同步目标：只有「影响宿主调用行为」的变更才推进标签
-# （判据见 STATUS.md §8.4 / §8.6）。因此文档 / 记忆类提交不会让所有宿主无谓地重新 pin。
+# （判据见 STATUS.md §8.4 版本号规则 / §8.5 完成检查清单）。因此文档 / 记忆类提交不会让所有宿主无谓地重新 pin。
 # 内置护栏：标签必须与本仓 STATUS.md 的 project_version 一致，否则拒绝打标——
 # 把「升版本」这一步从人的自觉变成机械约束。
 cmd_tag() {
@@ -259,14 +259,14 @@ cmd_tag() {
     pv="${pv%%$'\n'*}"
     if [ -n "$pv" ] && [ "v$pv" != "$TAG_NAME" ]; then
         die "标签与 STATUS.md 的 project_version 不一致：标签 ${TAG_NAME} vs STATUS.md ${pv}
-    发布标签必须对应 STATUS.md §8.6 的版本号：先更新 STATUS.md / changelog，再打标签。"
+    发布标签必须对应 STATUS.md §8.4 / §8.5 的版本号：先更新 STATUS.md / changelog，再打标签。"
     fi
 
     local short
     short="$(git -C "$ENGINE_DIR" rev-parse --short HEAD)"
     git -C "$ENGINE_DIR" tag -a "$TAG_NAME" \
         -m "release $TAG_NAME" \
-        -m "各宿主 gitlink 的同步目标（bash sync-hosts.sh --target release）。只有「影响宿主调用行为」的变更才推进本标签，判据见 STATUS.md §8.4 / §8.6。" >/dev/null
+        -m "各宿主 gitlink 的同步目标（bash sync-hosts.sh --target release）。只有「影响宿主调用行为」的变更才推进本标签，判据见 STATUS.md §8.4 版本号规则。" >/dev/null
 
     say "已创建发布标签：${TAG_NAME} → ${short}（本地标签，未 push）"
     say ""
