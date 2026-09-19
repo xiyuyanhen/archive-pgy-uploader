@@ -73,7 +73,7 @@ if [ -L "$TARGET_FILE" ]; then
     exit 0
   fi
   if [ "$FORCE" -ne 1 ]; then
-    echo "目标已存在软链（指向: $EXISTING），并非本源。" >&2
+    echo "目标已存在软链（指向: ${EXISTING}），并非本源。" >&2
     echo "如需覆盖请加 -f，或手动处理: $TARGET_FILE" >&2
     exit 1
   fi

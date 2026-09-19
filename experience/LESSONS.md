@@ -385,6 +385,62 @@ bash sync-hosts.sh --tag v1.2.0 --apply    # 主路径：一条命令完成「�
 
 ---
 
+## L-011 — `$VAR` 紧跟 CJK 字符时，**bash ≥ 5.2** 会把多字节字符吞进变量名（bash 3.2 反而正常）——并订正本项目先前的错误归因
+
+| 字段 | 值 |
+| --- | --- |
+| **状态** | `verified` |
+| **引入版本** | 1.2.0（订正 1.1.0 的归因） |
+| **关联执行** | `run-20260919-release-tag-sync-target`（本轮新增静态检查后扫出） |
+| **场景** | 脚本里写 `echo "提示（指向: $VAR），其余"` / `ERROR_MSG="…: $VAR（仅支持 …）"` 这类「变量后紧跟全角字符」的文案 |
+
+**事实（字节级实测，同一脚本分别用两个解释器跑）**：
+
+```bash
+# 脚本内容：V=abc; printf 'A:[%s]\n' "$V）tail"
+/bin/bash      →  A:[abc\357\274\211tail]      # 3.2.57：正确，变量在 CJK 前结束
+/opt/homebrew/bin/bash → A:[\274\211tail]       # 5.3.15：abc 整个消失，且 ） 的首字节 357 被吃掉
+LC_ALL=C /opt/homebrew/bin/bash → A:[abc\357\274\211tail]   # 显式 C locale 时不触发
+```
+
+**根因**：bash **5.2 起**变量名解析支持多字节字符，于是 `$V）` 被当作 **一个** 变量名
+（`V` + `）` 的首字节），该变量未定义 → 展开为空；被吞掉的首字节还让后续字节错位，
+所以输出会同时出现「值消失」与「乱码」。locale 是开关：显式 `LC_ALL=C` 正常；
+而本机 `LANG="" LC_CTYPE=C`（locale 实际未设置）这种形态下 5.3 **仍会**触发。
+
+**订正先前归因**：本项目此前把它记成「**bash 3.2** 在多字节字符前会吞掉变量名」
+（见 `experience/execution-log.json` 的 `run-20260919-hosts-sync-and-browser-consolidation` → findings）。
+实测**恰好相反**：3.2.57 正确、5.3.15 出错。修法（紧跟 CJK 一律写 `${VAR}`）不变，
+但**归因会影响排障方向**——若按「3.2 有 bug」去找，会完全找不到问题（因为 shebang 指向的 3.2 本来就正常）。
+
+**解法**：变量后紧跟非 ASCII 一律写 `${VAR}`；并用静态检查兜底：
+
+```bash
+python3 - <<'PY'
+import re, pathlib
+pat = re.compile(r'\$([A-Za-z_][A-Za-z0-9_]*)(?=[^\x00-\x7f])')
+for f in ['sync-hosts.sh','link-skill.sh','archive_upload.sh','pgy_upload.sh']:
+    for i, line in enumerate(pathlib.Path(f).read_text().splitlines(), 1):
+        if line.lstrip().startswith('#'):   # 注释里的 $VAR 不会展开，可忽略
+            continue
+        if pat.search(line):
+            print(f"{f}:{i} {line.strip()[:80]}")
+PY
+```
+
+本轮即由此扫出并修掉两处**真实**缺陷（均为文案，不影响控制流）：
+`link-skill.sh:76`（软链冲突提示会丢掉路径）、`pgy_upload.sh:422`（不支持的输入类型报错会丢掉输入路径）。
+`pgy_upload.sh:37/568/751` 的命中都在注释里，无害。
+
+**推广**：
+1. macOS 上「同一个脚本」可能被**两个不同大版本**的 bash 执行——`./x.sh`（走 shebang `/bin/bash` = 3.2.57）
+   与 `bash x.sh`（走 PATH 首位的 Homebrew bash 5.x）。**语言特性差异必须双解释器各跑一遍**，
+   只测一个解释器得到的「通过」是不可靠的。
+2. 这类缺陷只影响**文案**、不影响控制流，因此最难被发现——测试断言返回码与产物都不会报警，
+   只有人读到「半截错误信息」时才会察觉。静态检查比等着发现更划算。
+
+---
+
 ## L-NNN — <一句话标题>
 
 | 字段 | 值 |

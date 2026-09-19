@@ -419,7 +419,7 @@ process_archive() {
             PGY_CLEANUP="$tmp"
             ;;
         *)
-            STAGE="error"; ERROR_MSG="不支持的输入类型: $archive（仅支持 .xcarchive / .app / .ipa）"
+            STAGE="error"; ERROR_MSG="不支持的输入类型: ${archive}（仅支持 .xcarchive / .app / .ipa）"
             render_monitor; finish 1;;
     esac
 

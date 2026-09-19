@@ -27,6 +27,41 @@
 
 ---
 
+## CR-006 — 修复两处「变量后紧跟全角字符」导致的文案丢失（并订正 bash 版本归因）
+
+- **变更时间**：2026-09-19
+- **变更类型**：校准修正（**无版本变更**）
+- **关联版本**：无
+- **变更原因**：CR-005 引入的静态检查（变量后紧跟非 ASCII 的扫描）在既有文件中扫出两处**真实**命中。经字节级实测，根因是 **bash ≥ 5.2 的变量名解析支持多字节字符**，会把紧跟 `$VAR` 的 CJK 字符吞进变量名 → 变量判为未定义、展开为空，且被吞掉的首字节使后续字节错位。**这与本项目先前的归因相反**（此前记为「bash 3.2 吞变量名」，见 `execution-log.json` 的 run-20260919-hosts-sync-and-browser-consolidation 的 findings），故一并订正（新增 L-011）。
+
+**变更前后差异**
+
+| 项 | 变更前 | 变更后 |
+|----|--------|--------|
+| `link-skill.sh:76` | `echo "目标已存在软链（指向: $EXISTING），并非本源。"` → bash 5.x 下**路径消失**（只剩「目标已存在软链（指向: ），并非本源。」） | `…（指向: ${EXISTING}），…` |
+| `pgy_upload.sh:422` | `ERROR_MSG="不支持的输入类型: $archive（仅支持 …）"` → bash 5.x 下**输入路径消失**（这是生产上传引擎的报错文案） | `…: ${archive}（仅支持 …）` |
+| 归因记录 | 「bash 3.2 在多字节字符前会吞掉变量名」 | 「**bash ≥ 5.2** 会吞；3.2.57 正确」（实测：同一脚本两种解释器输出不同；显式 `LC_ALL=C` 不触发） |
+
+**影响范围**：`link-skill.sh`（1 行）、`pgy_upload.sh`（1 行）、`STATUS.md` §9.4、`experience/LESSONS.md`（L-011）、`experience/execution-log.json`。
+**兼容性说明**：**向后兼容**——仅字符串字面量的插值写法调整，参数、默认值、退出码、输出 JSON 字段、生成物路径**均未变**；`${VAR}` 与 `$VAR` 在非 CJK 场景语义完全等价。因未影响宿主调用行为，**不升版本、不打发布标签**（宿主仍 pin `v1.2.0`，本仓 HEAD 前移但标签不动，`sync-hosts.sh --check` 应仍报 3 宿主 up-to-date）。
+**验证方式**：
+
+```bash
+# 1) 代码区（排除注释）不应再有「$VAR + 非 ASCII」
+python3 -c "import re,pathlib;pat=re.compile(r'\\\$([A-Za-z_][A-Za-z0-9_]*)(?=[^\x00-\x7f])');[print(f'{f}:{i}',l.strip()[:60]) for f in ['sync-hosts.sh','link-skill.sh','archive_upload.sh','pgy_upload.sh'] for i,l in enumerate(pathlib.Path(f).read_text().splitlines(),1) if not l.lstrip().startswith('#') and pat.search(l)]"
+# 2) 两个解释器分别语法校验（macOS 上 ./x.sh 走 shebang 3.2.57，bash x.sh 走 PATH 首位的 5.x）
+for f in sync-hosts.sh link-skill.sh archive_upload.sh pgy_upload.sh; do /bin/bash -n "$f" && /opt/homebrew/bin/bash -n "$f"; done
+# 3) 最小复现（对照）：V=abc; printf '[%s]\n' "$V）tail"
+#    /bin/bash → [abc）tail] 正确 ; /opt/homebrew/bin/bash → 值丢失
+# 4) 宿主未被惊动（本次为无版本变更，标签不动）
+bash sync-hosts.sh --check    # 期望：3 宿主 up-to-date，退出码 0
+```
+
+> ⚠️ 本条同时暴露一个**验证盲区**：本项目所有脚本此前只用 `bash xxx.sh`（PATH 首位 = Homebrew bash 5.x）验证过，
+> 而 shebang 声明的是 `/bin/bash`（3.2.57）。两者语言特性不同，**只测一个解释器得到的「通过」不可靠**（已写入 L-011 推广段）。
+
+---
+
 ## CR-005 — 同步目标由「每个 HEAD」改为「发布标签驱动」（默认 `--target release`）
 
 - **变更时间**：2026-09-19
