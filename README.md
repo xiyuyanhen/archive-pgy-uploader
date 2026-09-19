@@ -144,7 +144,6 @@ bash "${SRCROOT}/Scripts/archive-pgy-uploader/pgy_upload.sh" \
 
 引擎被多个项目以 submodule 共享后，「引擎迭代」与「宿主更新 gitlink」是两步操作，缺少机制时会自然滞后
 ——本机实测曾同时存在三种状态：某项目落后 4 个 commit、某项目的 gitlink 只 add 未 commit、某项目干脆退化成文件复制。
-
 `sync-hosts.sh` 用一个**本机私有名单**把这件事压成一条命令：
 
 ```bash
@@ -169,8 +168,12 @@ bash sync-hosts.sh --install-hook --auto
 引擎开发期想跟本机 HEAD 用 `--target local`，交接 / 多机 / CI 跟远端分支用 `--target origin`。
 （引擎仓尚无 `v*` 标签时会直接报错并给出指引，不会静默退回 HEAD。）
 
-- 名单落在 `.local/hosts.json`（**gitignored，本机私有**）；退出码：`0`=一致或成功、`2`=有落后/需人工介入、`1`=出错。
-- 只有「落后且工作区干净」的项目会被改动；`--dry-run` 可先看动作，`--allow-dirty` 才越过工作区检查。
+- 名单落在 `.local/hosts.json`（**gitignored，本机私有**）；退出码：`0`=一致或成功、`2`=有落后 / 半套接入 / 需人工介入、`1`=出错。
+- 只有「落后 / 半套接入且工作区干净」的项目会被改动；`--dry-run` 可先看动作，`--allow-dirty` 才越过工作区检查。
+- **半套接入（`unregistered-gitlink`）也会被 `--apply` 自动补登**：`.gitmodules` 已入库但 gitlink 未登记。
+  这种状态下本地看起来正常，但**新克隆会静默缺少该子模块**（`git submodule update --init` 不报错也不检出），
+  直到构建时才发现引擎脚本缺失。补登仅对真正的子模块 checkout 生效（判据：git dir 在宿主 `.git/modules/` 下），
+  vendored 副本不会被误补登。
 - 若某宿主 pin 的 commit **比发布版本新**（`ahead-of-target`，例如开发期曾跟过本机 HEAD），默认不动——它已包含发布版本的行为。
 - 发布标签需 push（`git push origin vX.Y.Z`），否则他人 / 新克隆看不到。
 - 完整状态取值与参数见 `STATUS.md` §3.3。

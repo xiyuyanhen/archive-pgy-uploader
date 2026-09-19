@@ -188,6 +188,57 @@
       "changes": ["CR-005", "CR-006"],
       "open_issues_opened": [],
       "lessons_added": ["L-009", "L-010", "L-011"]
+    },
+    {
+      "run_id": "run-20260919-unregistered-gitlink-apply",
+      "date": "2026-09-19",
+      "project_version": "1.3.0",
+      "task": "让 sync-hosts.sh 识别并自动补登「半套接入」（unregistered-gitlink），并修复由该状态夹具照出的 --apply 整行串列缺陷",
+      "outcome": "success",
+      "summary": "上一轮手工修复 xiyu_todo_list 时遇到「.gitmodules 已入库、gitlink 未登记」的形态（git submodule status 为空），当时只能人工 git add + commit；工具把它误判为 not-a-submodule 并拒绝处理，属能力缺口。本版新增独立状态 unregistered-gitlink 与 --apply 自动补登：git add -- <子模块路径>（对嵌仓库即写 160000）+ 本地 commit；若子模块当前 HEAD 落后于目标，先 fetch + checkout --detach <目标> 再补登，一条命令完成「补登 + 对齐」。安全性上新增 is_submodule_checkout()，只对 git dir 落在宿主 .git/modules/ 下的真子模块 checkout 补登，避免把 vendored 副本误登记成 gitlink。同批修复一个既有缺陷：rows.tsv 中 pinned 为空时写出连续 tab，而 bash 的 read 会折叠连续 IFS 空白分隔符（jq 的 split 不会），导致 --apply 内整行左移一格（state 变 N、ACTION 变 skip:<dirty值> 并写进 JSON）。",
+      "findings": [
+        "【关键订正】unregistered-gitlink 的危害不是「update --init 报错」而是【静默】：实测新克隆后 .gitmodules 有声明、但 git 不认识该路径 → git submodule status 为空、子模块目录根本不出现、`git submodule update --init` 退出码 0（不报错也不检出）。这比直接报错更难查——CI/新同事 clone 后一切「成功」，直到构建时才发现引擎脚本缺失，排查方向极易跑到「构建配置」而非「登记不完整」。实现初稿把它写成「硬故障」，已订正注释与提示文案，并把 A/B 实测表写进 STATUS §3.3。",
+        "判断「子模块接入是否完整」必须看【索引模式是否为 160000】，而不是看磁盘上目录/文件是否存在——目录在、文件在都可能是假象（本项目真实案例：本地 git status 只把该目录显示为 ?? 未跟踪，无任何异常提示）。",
+        "自动补登需要安全边界，否则会制造反向问题：随手放进目录的 vendored 副本 / 嵌套仓库，其 HEAD 通常不存在于引擎仓，补登后立刻变 unknown-engine-commit，等于制造「已登记」的假象。判据取「子模块 git dir 是否落在宿主 .git/modules/ 下」——只有 git submodule add 会产生该布局。已用反向对照夹具实测：vendored 宿主补登后 git ls-files -s -- vend 仍为空。",
+        "【既有缺陷·被新状态照出】rows.tsv 的 pinned 为空时写出连续两个 \\t；tab 属 IFS 空白字符 → bash 的 read 把连续分隔符折叠成一个（非空白分隔符如 : 才保留空字段），于是 apply 循环里其后所有列左移：state 列实际拿到 dirty 的值（N）、ACTION 变成 skip:N，并被原样写入 JSON hosts[]。jq 的 split(\"\\t\") 与 awk -F'\\t' 都保留空字段，所以同一份数据两套解析器结果不同——这类不一致容易让人误判为「文件写错了」。",
+        "该串列缺陷只在「某些行的该列恰好为空」时触发，症状却出现在下游无关列上；只有当夹具里出现 pinned 为空的宿主（missing / not-a-submodule）时才暴露。修复方式是把「所有列非空」作为写入侧不变量（空值写占位符 -），并在 printf 上方留注释说明为何不能留空列。",
+        "uncommitted-gitlink（人已 git add、只差 commit）刻意不做自动提交：那可能是人工编辑的中间态，猜测人的意图风险大于收益。两类「登记类」状态因此有意分工：unregistered 自动补登、uncommitted 只提示。",
+        "夹具必须包含【反向对照】：只测「该被修的能修」不足以证明安全，还要测「不该动的确实没动」（host-c vendored 副本未被登记）。这与 CR-003 时用「输出逐字节一致」做零回归是同一思路。",
+        "新克隆 A/B 对照（修复前 clone vs 修复后 clone）是这类「登记完整性」缺陷唯一有说服力的验证方式——本地 --check 在修复前也「看起来正常」（只显示 ?? 未跟踪），只有真克隆一次才能看到子模块目录根本不存在。"
+      ],
+      "evidence": {
+        "commits": [
+          {
+            "hash": "078e6b4",
+            "subject": "本版基于的提交（v1.2.0 标签之后的 3 个提交之一）",
+            "supports": "宿主当时 pin 在 v1.2.0 (566be32)，引擎 HEAD 已前进 3 个提交；本版完成后打 v1.3.0 并同步三宿主"
+          }
+        ]
+      },
+      "artifacts": {
+        "files": [
+          "sync-hosts.sh",
+          "STATUS.md",
+          "README.md",
+          "changelog/CHANGES.md",
+          "changelog/CHANGELOG.md",
+          "changelog/v1.3.0.md",
+          "experience/LESSONS.md",
+          "experience/execution-log.json"
+        ],
+        "tags": [
+          "v1.3.0（本版发布标签，指向本版提交）"
+        ],
+        "external": {
+          "not_done": [
+            "引擎 commit 与本版发布标签均未 push origin（OPEN-005），push 由使用者主导",
+            "未对 xiyuScoreboard / xiyu_todo_list / xiyuWebBrowser 造成额外人工项（三者经 --apply 后均为 up-to-date）"
+          ]
+        }
+      },
+      "changes": ["CR-007"],
+      "open_issues_opened": [],
+      "lessons_added": ["L-012", "L-013"]
     }
   ]
 }

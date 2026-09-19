@@ -29,6 +29,7 @@
 #    bash sync-hosts.sh --json             # 单行 JSON（供 AI/CI 解析）
 #    bash sync-hosts.sh --list             # 打印本机名单
 #    bash sync-hosts.sh --apply            # 同步落后宿主：更新 gitlink 并本地 commit
+#                                          # （同时自动补登「半套接入」的 gitlink）
 #    bash sync-hosts.sh --apply --no-commit    # 只 checkout + stage，不 commit
 #    bash sync-hosts.sh --target local     # 改用本机 HEAD 为同步目标（开发期）
 #    bash sync-hosts.sh --target origin    # 改用 origin 默认分支为目标
@@ -46,16 +47,30 @@
 #                             不加 --auto 则始终只提示。
 #    bash sync-hosts.sh --uninstall-hook
 #
+#  状态（hosts[].state）：
+#    up-to-date            宿主 pin == 同步目标
+#    outdated              pin 是目标的祖先 → --apply 更新 gitlink
+#    unregistered-gitlink  半套接入：.gitmodules 已入库、目录是合法子模块 checkout，
+#                          但 gitlink 未登记 → --apply 自动补登（并把版本对齐到目标）。
+#                          危害静默：新克隆 update --init 不报错也不检出该子模块。
+#    ahead-of-target       pin 是目标的后代（宿主已含发布版本行为）→ 良性，默认不动
+#    uncommitted-gitlink   子模块已 add 但宿主从未 commit（.gitmodules+gitlink 仍在暂存区）
+#    diverged / unknown-engine-commit / not-a-submodule / not-a-repo / missing
+#                          需人工判断，脚本不自动处理（只在报告中给指引）
+#
 #  安全约束：
-#    - --apply 只处理「状态=outdated 且宿主工作区干净」的宿主；其余一律跳过并说明原因。
+#    - --apply 只处理「状态 = outdated 或 unregistered-gitlink 且宿主工作区干净」的宿主；
+#      其余一律跳过并说明原因。
 #    - 子模块工作区有未提交改动 → 跳过该宿主（不覆盖任何人工改动）。
 #    - 宿主工作区脏（未提交改动）默认也跳过；--allow-dirty 可越过该检查，因为
 #      gitlink 更新走 `git add -- <子模块路径>` + `git commit -- <子模块路径>`（带 pathspec），
 #      **不会**把宿主的其它改动卷进这次提交。子模块自身的脏工作区则始终拒绝。
+#    - 补登 gitlink 仅对「真正的子模块 checkout」生效（判据：其 git dir 落在宿主
+#      .git/modules/ 下）。vendored 副本 / 嵌套仓库不会被误补登，而是提示走 git submodule add。
 #    - 宿主 pin 的 commit 比目标新（ahead-of-target）默认不动；回落需 --allow-downgrade。
 #    - 引擎目录内不得出现密钥；本脚本不读、不写、不打印任何凭证。
 #
-#  退出码：0=全部最新或全部成功；2=存在落后/需人工介入（仅 --check 语义）；1=执行出错。
+#  退出码：0=全部最新或全部成功；2=存在落后 / 半套接入 / 需人工介入（仅 --check 语义）；1=执行出错。
 # ==============================================================================
 set -euo pipefail
 
@@ -187,6 +202,62 @@ tag_is_semver() {
         [ -n "$p" ] || return 1
     done
     return 0
+}
+
+# ---------- 宿主侧「子模块登记形态」判定 ----------
+
+# 子模块路径是否已在宿主索引里登记为 gitlink（模式 160000）
+gitlink_in_index() {
+    git -C "$1" ls-files -s -- "$2" 2>/dev/null | awk '$1=="160000"{f=1} END{exit !f}'
+}
+
+# .gitmodules 是否声明了该路径（优先看 HEAD，其次看索引——覆盖「已 add 未 commit」）
+gitmodules_declares() {
+    local host="$1" sub="$2" content
+    content="$(git -C "$host" show HEAD:.gitmodules 2>/dev/null || true)"
+    [ -n "$content" ] || content="$(git -C "$host" show :.gitmodules 2>/dev/null || true)"
+    [ -n "$content" ] || return 1
+    printf '%s\n' "$content" | awk -v want="$sub" '
+        /^[[:space:]]*path[[:space:]]*=/ {
+            p = $0
+            sub(/^[[:space:]]*path[[:space:]]*=[[:space:]]*/, "", p)
+            sub(/[[:space:]]+$/, "", p)
+            if (p == want) found = 1
+        }
+        END { exit !found }'
+}
+
+# 该目录是否是「真正的子模块 checkout」（而非随手放进去的 vendored 副本 / 嵌套仓库）。
+# 判据：其 git dir 落在宿主的 .git/modules/ 下 —— 只有 git submodule add 会产生这种布局。
+# 这条判据让「自动补登 gitlink」保持安全：补登一个 vendored 副本的 HEAD 没有意义
+# （该 commit 通常不存在于引擎仓，补登完立刻变成 unknown-engine-commit），
+# 那种情况应提示走 git submodule add，而不是悄悄写进一个错误的 gitlink。
+is_submodule_checkout() {
+    local host="$1" sub="$2" hgd sgd
+    hgd="$(git -C "$host" rev-parse --absolute-git-dir 2>/dev/null || true)"
+    sgd="$(git -C "$host/$sub" rev-parse --absolute-git-dir 2>/dev/null || true)"
+    [ -n "$hgd" ] && [ -n "$sgd" ] || return 1
+    case "$sgd" in
+        "$hgd"/modules/*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# 某个 commit 与同步目标的关系 → 输出 "<behind>\t<relation>"
+# relation: same | behind | ahead | unknown | diverged
+compare_to_target() {
+    local sha="$1"
+    if ! git -C "$ENGINE_DIR" cat-file -e "${sha}^{commit}" 2>/dev/null; then
+        printf '%s\t%s\n' "-" "unknown"
+    elif [ "$sha" = "$TARGET_SHA" ]; then
+        printf '%s\t%s\n' "0" "same"
+    elif git -C "$ENGINE_DIR" merge-base --is-ancestor "$sha" "$TARGET_SHA" 2>/dev/null; then
+        printf '%s\t%s\n' "$(git -C "$ENGINE_DIR" rev-list --count "$sha..$TARGET_SHA")" "behind"
+    elif git -C "$ENGINE_DIR" merge-base --is-ancestor "$TARGET_SHA" "$sha" 2>/dev/null; then
+        printf '%s\t%s\n' "0" "ahead"
+    else
+        printf '%s\t%s\n' "-" "diverged"
+    fi
 }
 
 cmd_list() {
@@ -443,44 +514,60 @@ while IFS=$'\t' read -r name hpath sub; do
         state="missing"
     elif ! git -C "$hpath" rev-parse --git-dir >/dev/null 2>&1; then
         state="not-a-repo"
-    elif ! git -C "$hpath" ls-files -s -- "$sub" 2>/dev/null | awk '$1=="160000"{f=1} END{exit !f}'; then
-        state="not-a-submodule"
-    else
+    elif gitlink_in_index "$hpath" "$sub"; then
+        # 正常形态：gitlink 已在索引里
         pinned="$(git -C "$hpath" ls-tree HEAD -- "$sub" 2>/dev/null | awk '{print $3}')"
         if [ -z "$pinned" ]; then
             # gitlink 只在索引里（子模块已 add 但宿主从未 commit）→ 用索引里的 sha 仍可报告落后量
             pinned="$(git -C "$hpath" ls-files -s -- "$sub" 2>/dev/null | awk '$1=="160000"{print $2}')"
             state="uncommitted-gitlink"
         fi
-        if ! git -C "$ENGINE_DIR" cat-file -e "$pinned^{commit}" 2>/dev/null; then
-            [ -n "$state" ] || state="unknown-engine-commit"
-        elif [ "$pinned" = "$TARGET_SHA" ]; then
-            behind="0"
-            [ -n "$state" ] || state="up-to-date"
-        elif git -C "$ENGINE_DIR" merge-base --is-ancestor "$pinned" "$TARGET_SHA" 2>/dev/null; then
-            behind="$(git -C "$ENGINE_DIR" rev-list --count "$pinned..$TARGET_SHA")"
-            [ -n "$state" ] || state="outdated"
-        elif git -C "$ENGINE_DIR" merge-base --is-ancestor "$TARGET_SHA" "$pinned" 2>/dev/null; then
-            # 宿主 pin 的是目标的**后代**（例如目标还是发布标签，宿主曾跟到本机 HEAD）。
-            # 这不是错误：宿主已经包含发布版本的行为，默认不动（回落需 --allow-downgrade）。
-            behind="0"
-            [ -n "$state" ] || state="ahead-of-target"
-        else
-            [ -n "$state" ] || state="diverged"
-        fi
-        if [ -n "$(git -C "$hpath" status --porcelain 2>/dev/null | awk -v s="$sub" 'substr($0,1,2)!="??"{p=$2; if(p!=s) print}')" ]; then
-            dirty="Y"
-        fi
-        if [ -n "$(git -C "$hpath/$sub" status --porcelain 2>/dev/null || true)" ]; then
-            dirty="S"
+    elif gitmodules_declares "$hpath" "$sub" && [ -d "$hpath/$sub" ] &&
+         is_submodule_checkout "$hpath" "$sub"; then
+        # 半套接入：.gitmodules 已入库 + 目录是合法的子模块 checkout，但 gitlink 未登记。
+        # 危害是**静默**的（实测）：新克隆后 `.gitmodules` 有声明、但 git 不认识该路径，
+        # `git submodule update --init` **不报错也不检出**（退出码 0），子模块目录根本不出现
+        # ——直到构建时才发现引擎脚本缺失。而本地 `git status` 只把该目录显示为未跟踪。
+        # → 可被 --apply 自动补登。
+        pinned="$(git -C "$hpath/$sub" rev-parse HEAD 2>/dev/null || true)"
+        state="unregistered-gitlink"
+    else
+        state="not-a-submodule"
+    fi
+
+    # 统一算与同步目标的关系（state 已被强制时只补 behind，不改状态名）
+    if [ -n "$pinned" ]; then
+        IFS=$'\t' read -r behind relation < <(compare_to_target "$pinned")
+        if [ -z "$state" ]; then
+            case "$relation" in
+                same)    state="up-to-date" ;;
+                behind)  state="outdated" ;;
+                ahead)   state="ahead-of-target" ;;
+                unknown) state="unknown-engine-commit" ;;
+                *)       state="diverged" ;;
+            esac
         fi
     fi
 
+    case "$state" in
+        missing|not-a-repo|not-a-submodule) : ;;
+        *)
+            if [ -n "$(git -C "$hpath" status --porcelain 2>/dev/null | awk -v s="$sub" 'substr($0,1,2)!="??"{p=$2; if(p!=s) print}')" ]; then
+                dirty="Y"
+            fi
+            if [ -n "$(git -C "$hpath/$sub" status --porcelain 2>/dev/null || true)" ]; then
+                dirty="S"
+            fi ;;
+    esac
+
+    # 注意：所有列都必须非空。tab 属 IFS 空白字符，bash 的 `read` 会把**连续 tab 折叠成一个**
+    # （与 jq 的 split("\t") 行为不同）——一旦某列写成空串，下面 apply 循环读回时整行会左移，
+    # action / state 全部串位。故空值一律写占位符 `-`。
     printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-        "$name" "$hpath" "$sub" "$(printf '%.7s' "${pinned:-}")" "${behind:--}" "$state" "$dirty" "$action" >> "$ROWS"
+        "$name" "$hpath" "$sub" "$(printf '%.7s' "${pinned:--}")" "${behind:--}" "$state" "$dirty" "$action" >> "$ROWS"
 done < <(jq -r '.hosts[]? | [.name, .path, .submodule] | @tsv' "$REGISTRY")
 
-TOTAL=0; OUTDATED=0; AHEAD=0; ATTENTION=0
+TOTAL=0; OUTDATED=0; AHEAD=0; UNREG=0; ATTENTION=0
 while IFS=$'\t' read -r _ _ _ _ _ st _ _; do
     TOTAL=$((TOTAL + 1))
     if [ "$st" = "outdated" ]; then
@@ -488,10 +575,31 @@ while IFS=$'\t' read -r _ _ _ _ _ st _ _; do
     elif [ "$st" = "ahead-of-target" ]; then
         # 「比目标新」是良性状态（宿主已含发布版本行为），不计入需人工处理
         AHEAD=$((AHEAD + 1))
+    elif [ "$st" = "unregistered-gitlink" ]; then
+        # 半套接入：--apply 可自动补登，但仍属「需要动作」（新克隆会失败）
+        UNREG=$((UNREG + 1))
     elif [ "$st" != "up-to-date" ]; then
         ATTENTION=$((ATTENTION + 1))
     fi
 done < "$ROWS"
+
+# --apply 的执行前置检查：返回空 = 可执行；返回非空 = 跳过原因（ACTION 文案），并已向 stderr 说明
+precheck_actionable() {
+    local name="$1" dirty="$2"
+    if [ "$dirty" = "S" ]; then
+        err "⚠️  ${name}：子模块工作区有未提交改动，跳过（不覆盖人工改动）"
+        printf '%s' "skip:子模块有改动"; return 0
+    fi
+    if [ "$dirty" = "Y" ] && [ "$ALLOW_DIRTY" = "0" ]; then
+        err "⚠️  ${name}：宿主工作区有未提交改动，跳过（如需越过：--allow-dirty）"
+        printf '%s' "skip:宿主工作区不干净"; return 0
+    fi
+    if [ "$ENGINE_BRANCH" = "HEAD" ] && [ "$TARGET_SOURCE" = "local" ]; then
+        err "⚠️  ${name}：引擎仓处于 detached HEAD，请先切回分支或用 --target origin"
+        printf '%s' "skip:引擎处于-detached-HEAD"; return 0
+    fi
+    printf ''
+}
 
 # ---------- --apply ----------
 APPLY_FAILED=0
@@ -510,15 +618,9 @@ if [ "$MODE" = "apply" ] && [ "$TOTAL" -gt 0 ]; then
                 action="skip:比目标新"
                 err "ℹ️  ${name}：固定的 commit 比目标（${TARGET_DESC}）新，默认不动；如需回落：--allow-downgrade" ;;
             outdated)
-                if [ "$dirty" = "S" ]; then
-                    action="skip:子模块有改动"
-                    err "⚠️  ${name}：子模块工作区有未提交改动，跳过（不覆盖人工改动）"
-                elif [ "$dirty" = "Y" ] && [ "$ALLOW_DIRTY" = "0" ]; then
-                    action="skip:宿主工作区不干净"
-                    err "⚠️  ${name}：宿主工作区有未提交改动，跳过（如需越过：--allow-dirty）"
-                elif [ "$ENGINE_BRANCH" = "HEAD" ] && [ "$TARGET_SOURCE" = "local" ]; then
-                    action="skip:引擎处于-detached-HEAD"
-                    err "⚠️  ${name}：引擎仓处于 detached HEAD，请先切回分支或用 --target origin"
+                guard="$(precheck_actionable "$name" "$dirty")"
+                if [ -n "$guard" ]; then
+                    action="$guard"
                 elif [ "$DRY_RUN" = "1" ]; then
                     action="dry-run"
                     say "[DRY-RUN] $name: ${pinned:-?} → $TARGET_SHORT  (git -C $hpath/$sub fetch + checkout --detach; git -C $hpath add $sub$([ "$DO_COMMIT" = "1" ] && echo ' + commit'))"
@@ -548,6 +650,71 @@ if [ "$MODE" = "apply" ] && [ "$TOTAL" -gt 0 ]; then
                     fi
                 fi
                 ;;
+            unregistered-gitlink)
+                # 半套接入：.gitmodules 已入库 + 目录是合法子模块 checkout，但 gitlink 未登记。
+                # 本地 `git status` 只把它显示为未跟踪，看不出问题；而新克隆执行
+                # `git submodule update --init` 会失败（.gitmodules 指向 git 不认识的路径）。
+                # 修法 = 补登 gitlink（`git add` 对嵌仓库即写模式 160000），顺带对齐到目标版本。
+                guard="$(precheck_actionable "$name" "$dirty")"
+                if [ -n "$guard" ]; then
+                    action="$guard"
+                else
+                    reg_cur="$(git -C "$hpath/$sub" rev-parse HEAD 2>/dev/null || true)"
+                    IFS=$'\t' read -r _reg_behind reg_rel < <(compare_to_target "${reg_cur:-}")
+                    case "$reg_rel" in
+                        behind|same) reg_want="$TARGET_SHA" ;;
+                        ahead)
+                            # 宿主（子模块 checkout）已含目标版本的行为 → 默认保持不动
+                            if [ "$ALLOW_DOWNGRADE" = "1" ]; then reg_want="$TARGET_SHA"; else reg_want="$reg_cur"; fi ;;
+                        *)
+                            # unknown / diverged：先完成登记（这才是本状态的核心缺陷），版本关系另行提示
+                            reg_want="$reg_cur" ;;
+                    esac
+                    reg_short="$(printf '%.7s' "$reg_want")"
+                    reg_cur_short="$(printf '%.7s' "$reg_cur")"
+                    # .gitmodules 若还不在 HEAD（只在暂存区），必须一并纳入本次提交
+                    reg_paths=("$sub")
+                    git -C "$hpath" cat-file -e HEAD:.gitmodules 2>/dev/null || reg_paths+=(".gitmodules")
+                    if [ "$DRY_RUN" = "1" ]; then
+                        action="dry-run"
+                        say "[DRY-RUN] ${name}: 补登 gitlink ${reg_cur_short} → ${reg_short}  (git -C $hpath add -- ${reg_paths[*]}$([ "$DO_COMMIT" = "1" ] && echo ' + commit'))"
+                    else
+                        reg_ok=1
+                        if [ "$reg_want" != "$reg_cur" ]; then
+                            reg_ok=0
+                            git -C "$hpath/$sub" fetch --quiet "$ENGINE_DIR" "$SYNC_FETCH_REF" 2>/dev/null &&
+                            git -C "$hpath/$sub" cat-file -e "$reg_want^{commit}" 2>/dev/null &&
+                            git -C "$hpath/$sub" checkout --quiet --detach "$reg_want" 2>/dev/null && reg_ok=1
+                        fi
+                        if [ "$reg_ok" = "1" ] &&
+                           git -C "$hpath" add -- "${reg_paths[@]}" 2>/dev/null &&
+                           [ -n "$(git -C "$hpath" ls-files -s -- "$sub" | awk '$1=="160000"{print $2}')" ]; then
+                            if [ "$DO_COMMIT" = "1" ]; then
+                                if git -C "$hpath" commit --quiet \
+                                   -m "fix(submodule): 补登引擎子模块 gitlink → $reg_short" -- "${reg_paths[@]}"; then
+                                    action="registered"
+                                    say "✅ ${name}：已补登 gitlink → ${reg_short}（本地 commit，未 push）"
+                                else
+                                    action="error:commit-失败"
+                                    APPLY_FAILED=1
+                                    err "❌ ${name}：gitlink 已 stage 但 commit 失败"
+                                fi
+                            else
+                                action="registered-staged"
+                                say "✅ ${name}：已补登 + stage（--no-commit，未提交）"
+                            fi
+                        else
+                            action="error:补登失败"
+                            APPLY_FAILED=1
+                            err "❌ ${name}：补登 gitlink 失败（检查子模块 checkout / .gitmodules / 版本可达性）"
+                        fi
+                    fi
+                    case "$reg_rel" in
+                        behind|same) : ;;
+                        *) err "ℹ️  ${name}：已按子模块当前 HEAD 补登；其与目标的版本关系为 ${reg_rel}，下次 --check 仍会提示人工处理" ;;
+                    esac
+                fi
+                ;;
             *)
                 action="skip:$state" ;;
         esac
@@ -563,6 +730,9 @@ if [ "$JSON" = "1" ]; then
         ST="error"
     elif [ "$MODE" = "check" ] && [ "$OUTDATED" -gt 0 ]; then
         ST="outdated"
+    elif [ "$MODE" = "check" ] && [ "$UNREG" -gt 0 ]; then
+        # 「半套接入」可由 --apply 修复，与 outdated 同属「可自动处理」，但语义不同故单列
+        ST="unregistered"
     elif [ "$MODE" = "check" ] && [ "$ATTENTION" -gt 0 ]; then
         ST="attention"
     else
@@ -579,6 +749,7 @@ if [ "$JSON" = "1" ]; then
         --argjson total "$TOTAL" \
         --argjson outdated "$OUTDATED" \
         --argjson ahead "$AHEAD" \
+        --argjson unregistered "$UNREG" \
         --argjson attention "$ATTENTION" \
         --argjson hosts "$(jq -R -s '
             split("\n") | map(select(length>0) | split("\t") |
@@ -588,7 +759,8 @@ if [ "$JSON" = "1" ]; then
         '{status:$status,
           engine:{path:$epath, head:$head, target:$target, target_short:$tshort,
                   source:$source, release_tag:(if $tag=="" then null else $tag end)},
-          summary:{total:$total, outdated:$outdated, ahead_of_target:$ahead, attention:$attention},
+          summary:{total:$total, outdated:$outdated, unregistered:$unregistered,
+                   ahead_of_target:$ahead, attention:$attention},
           hosts:$hosts, error:null}'
 else
     say "引擎：$ENGINE_DIR"
@@ -613,8 +785,17 @@ else
                 say "ℹ️  ${n}：固定的 ${p} 比目标（${TARGET_DESC}）新，尚未推进到该处 → 默认不动，回落需 --allow-downgrade"
             done
         fi
-        # 除「已最新 / 落后 / 比目标新」之外的异常状态给出可执行提示（这些状态不会被 --apply 自动处理）
-        awk -F'\t' '$6!="up-to-date" && $6!="outdated" && $6!="ahead-of-target" {print $1"\t"$6}' "$ROWS" |
+        # 「半套接入」可被 --apply 自动补登，单独列出（它的本地表现只是「未跟踪目录」，极易漏看）。
+        # 仅 check 模式打印：apply 模式下这些行要么已被补登（再提示即为过时信息），
+        # 要么因工作区不干净被跳过（原因已由 stderr 说明 + ACTION 列可见）。
+        if [ "$MODE" = "check" ] && [ "$UNREG" -gt 0 ]; then
+            awk -F'\t' '$6=="unregistered-gitlink" {print $1"\t"$4}' "$ROWS" |
+            while IFS=$'\t' read -r n p; do
+                say "⚠️  ${n}：.gitmodules 已入库但 gitlink 未登记（本地看似正常；新克隆会**静默**缺少该子模块，update --init 不报错也不检出）→ ${p}；执行 --apply 可自动补登"
+            done
+        fi
+        # 除「已最新 / 落后 / 比目标新 / 半套接入」之外的异常状态给出可执行提示（这些状态不会被 --apply 自动处理）
+        awk -F'\t' '$6!="up-to-date" && $6!="outdated" && $6!="ahead-of-target" && $6!="unregistered-gitlink" {print $1"\t"$6}' "$ROWS" |
         while IFS=$'\t' read -r n st; do
             case "$st" in
                 missing)               say "⚠️  ${n}：宿主路径不存在（磁盘未挂载 / 项目已移动）→ 核对该条目的 path" ;;
@@ -627,10 +808,13 @@ else
         done
         say ""
         if [ "$MODE" = "check" ]; then
-            if [ "$OUTDATED" -gt 0 ]; then
-                say "结论：$OUTDATED/$TOTAL 个宿主落后于目标（${TARGET_DESC}），执行 --apply 即可同步（宿主侧本地 commit，不 push）。"
+            if [ "$OUTDATED" -gt 0 ] || [ "$UNREG" -gt 0 ]; then
+                cnt_parts=""
+                [ "$OUTDATED" -gt 0 ] && cnt_parts="${OUTDATED} 个落后"
+                [ "$UNREG" -gt 0 ] && cnt_parts="${cnt_parts:+${cnt_parts}、}${UNREG} 个半套接入"
+                say "结论：${cnt_parts}（共 $TOTAL 个宿主），执行 --apply 即可处理（宿主侧本地 commit，不 push）。"
             elif [ "$ATTENTION" -gt 0 ]; then
-                say "结论：无落后项，但有 $ATTENTION 个宿主需人工处理（见上方提示）。"
+                say "结论：无可自动处理的项，但有 $ATTENTION 个宿主需人工处理（见上方提示）。"
             elif [ "$AHEAD" -gt 0 ]; then
                 say "结论：$AHEAD 个宿主比目标（${TARGET_DESC}）新，属良性（默认不动；回落需 --allow-downgrade）。"
             else
@@ -641,5 +825,5 @@ else
 fi
 
 if [ "$APPLY_FAILED" -gt 0 ]; then exit 1; fi
-if [ "$MODE" = "check" ] && { [ "$OUTDATED" -gt 0 ] || [ "$ATTENTION" -gt 0 ]; }; then exit 2; fi
+if [ "$MODE" = "check" ] && { [ "$OUTDATED" -gt 0 ] || [ "$UNREG" -gt 0 ] || [ "$ATTENTION" -gt 0 ]; }; then exit 2; fi
 exit 0

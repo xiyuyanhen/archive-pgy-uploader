@@ -22,6 +22,7 @@
 
 | 版本 | 日期 | 摘要 | 详情 |
 | --- | --- | --- | --- |
+| [v1.3.0](./v1.3.0.md) | 2026-09-19 | `--apply` 支持自动补登「半套接入」（`unregistered-gitlink`：`.gitmodules` 已入库但 gitlink 未登记）；新增状态值与 JSON 字段；同批修复 `--apply` 的 tab 折叠串列缺陷（CR-007） | 半套接入检测与自动补登 |
 | [v1.2.0](./v1.2.0.md) | 2026-09-19 | 同步目标由「每个 HEAD」改为**发布标签驱动**（默认 `--target release`）；新增 `--tag` / `--allow-downgrade` / `ahead-of-target` 状态；钩子改为只在发布时同步（CR-005） | 发布标签驱动的同步目标 |
 | [v1.1.0](./v1.1.0.md) | 2026-09-19 | 新增本机多宿主同步器 `sync-hosts.sh` + `.local` 名单模式；同批收敛 `xiyuWebBrowser` 接入方式并关闭 OPEN-003 / OPEN-004（CR-004、CR-003） | 多宿主跟随同步 |
 | [v1.0.0](./v1.0.0.md) | 2026-09-19 | 建立项目治理基线：`STATUS.md` / `changelog` / `experience` / `AGENTS.md`（CR-001） | 治理基线建设 |

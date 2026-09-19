@@ -3,7 +3,7 @@ document_type: "project-status"
 schema_version: "1.0"
 status_version: "1.0"
 project_name: "archive-pgy-uploader"
-project_version: "1.2.0"
+project_version: "1.3.0"
 last_calibrated: "2026-09-19"
 calibration_state: "current"
 authority: "本文件是本项目现状的唯一事实来源；与 README / AGENTS.md 冲突时以本文件为准"
@@ -56,9 +56,9 @@ known_issues:
 | 项 | 值 |
 | --- | --- |
 | 项目名称 | `archive-pgy-uploader` |
-| 项目版本 | 1.2.0 |
+| 项目版本 | 1.3.0 |
 | 状态文档版本 | 1.0 |
-| 最近校准 | 2026-09-19（v1.2.0：同步目标改为**发布标签驱动**；新增 `--tag` / `--allow-downgrade` / `ahead-of-target` 状态；钩子改为只在发布时同步） |
+| 最近校准 | 2026-09-19（v1.3.0：新增「半套接入」`unregistered-gitlink` 的检测与自动补登；同批修复 `--apply` 的 tab 折叠串列缺陷） |
 | 一句话定位 | 通用 Xcode Archive → 蒲公英(Pgyer) 自动上传引擎（多项目以 submodule 共享，配置与密钥按项目分离） |
 | 成熟度 | 已在 3 个 iOS 项目实际使用且接入方式已统一为 submodule（xiyuScoreboard / xiyu_todo_list / xiyuWebBrowser）；治理基线自 v1.0.0 起 |
 | 远端仓库 | https://codeup.aliyun.com/61c852431ccc3a1faae0a9fa/scripts/archive-pgy-uploader.git |
@@ -90,6 +90,7 @@ known_issues:
 | C10 | 项目配置与控制文件模板 | `examples/` | 稳定 | `pgy_config.example.sh` / `PGYUploadHistory.example.json` |
 | C11 | 本机多宿主跟随同步：按 `.local/hosts.json` 名单体检 / 批量更新各宿主 gitlink（含可选 post-commit 自动跟随） | `sync-hosts.sh` | 稳定 | 仅本机使用，**不 push**；名单 gitignored（v1.1.0 新增） |
 | C12 | **发布标签驱动的同步目标**：默认只跟「最新发布标签 `v*`」，只有影响宿主调用行为的变更才推进标签 → 文档 / 记忆类提交不再让所有宿主无谓重新 pin | `sync-hosts.sh --target release`（默认）+ `--tag` | 稳定 | v1.2.0 新增；`--target local/origin` 保留为开发期 / 交接期逃生口 |
+| C13 | **半套接入检测与自动补登**：识别「`.gitmodules` 已入库但 gitlink 未登记」并自动补登（可同时把版本对齐到目标）；仅对真正的子模块 checkout 生效，vendored 副本不误补登 | `sync-hosts.sh`（状态 `unregistered-gitlink`） | 稳定 | v1.3.0 新增；该状态对新克隆是**静默**失效（`update --init` 不报错也不检出） |
 
 ### 2.2 明确不做（范围外）
 
@@ -164,7 +165,7 @@ bash <引擎目录>/pgy_upload.sh --archive /path/to/Runner.xcarchive \
 | `--json` | stdout 输出结构化 JSON |
 | `-h` / `--help` | 打印头部注释 |
 
-### 3.3 本机多宿主同步（`sync-hosts.sh`，v1.1.0 新增 / v1.2.0 引入发布标签目标）
+### 3.3 本机多宿主同步（`sync-hosts.sh`，v1.1.0 新增 / v1.2.0 发布标签目标 / v1.3.0 补登半套接入）
 
 > **仅在本机使用，不进入宿主调用链**——宿主项目无需更新 gitlink 即可继续工作。
 > 名单文件 `.local/hosts.json`（**gitignored、本机私有**）：`{schema, engineRemote, hosts:[{name, path, submodule}]}`，
@@ -184,11 +185,11 @@ bash <引擎目录>/pgy_upload.sh --archive /path/to/Runner.xcarchive \
 | 参数 | 说明 |
 | --- | --- |
 | `--check`（默认） | 只读体检：逐宿主报告固定 commit / 落后多少 / 状态 / 是否脏 |
-| `--json` | stdout **单行 JSON**（`status` / `engine{path,head,target,target_short,source,release_tag}` / `summary{total,outdated,ahead_of_target,attention}` / `hosts[]` / `error`） |
+| `--json` | stdout **单行 JSON**（`status` / `engine{path,head,target,target_short,source,release_tag}` / `summary{total,outdated,unregistered,ahead_of_target,attention}` / `hosts[]` / `error`） |
 | `--list` | 打印本机名单 |
 | `--target <release\|local\|origin>` | 选择同步目标（默认 `release`） |
 | `--tag vX.Y.Z` | 在当前 HEAD 打**发布标签**（发布动作）；与 `STATUS.md` 的 `project_version` **不一致即拒绝**，工作区脏也拒绝 |
-| `--apply` | 对「状态 = outdated 且工作区干净」的宿主：`fetch` + `checkout --detach <目标>` + `git add <子模块路径>` + **本地** commit |
+| `--apply` | 对「状态 = `outdated` 或 `unregistered-gitlink` 且工作区干净」的宿主：`fetch` + `checkout --detach <目标>` + `git add <子模块路径>` + **本地** commit（`unregistered-gitlink` 见下） |
 | `--no-commit` | 只 checkout + stage，不 commit |
 | `--only <a,b>` | 只处理指定宿主 |
 | `--allow-dirty` | 越过「宿主工作区脏则跳过」的默认拒绝（gitlink 更新带 pathspec，不会卷入宿主其它改动） |
@@ -198,13 +199,33 @@ bash <引擎目录>/pgy_upload.sh --archive /path/to/Runner.xcarchive \
 | `--install-hook [--auto]` / `--uninstall-hook` | 装 / 卸本机 `post-commit` 钩子；`--auto` **只在「HEAD 正好是发布标签」（= 一次发布）时**才 `--apply`，普通提交只提示；`PGY_SYNC_HOOK_DISABLE=1` 可临时禁用 |
 
 **状态取值**：`up-to-date` / `outdated` / `ahead-of-target`（宿主 pin 是目标的**后代**，即比发布版本新）/
+`unregistered-gitlink`（**半套接入**：`.gitmodules` 已入库 + 目录是合法子模块 checkout，但 gitlink 未登记）/
 `uncommitted-gitlink`（子模块已 add 但宿主从未 commit）/ `diverged` / `unknown-engine-commit` /
 `not-a-submodule` / `not-a-repo` / `missing`。
 
-- 只有 `outdated`（以及显式 `--allow-downgrade` 下的 `ahead-of-target`）会被 `--apply` 改动；其余只给人工提示。
+- 只有 `outdated` / `unregistered-gitlink`（以及显式 `--allow-downgrade` 下的 `ahead-of-target`）
+  会被 `--apply` 改动；其余只给人工提示。
 - `ahead-of-target` **是良性状态**（宿主已包含发布版本的行为），不计入「需人工处理」，也不会让 `--check` 返回 `2`。
 
-**退出码**：`0` = 一致或全部成功；`2` = 存在落后或需人工介入（仅 `--check` 语义）；`1` = 执行出错。
+**`unregistered-gitlink`（半套接入，v1.3.0 新增）——危害是静默的**
+
+成因：`.gitmodules` 被提交了，但 gitlink 没进索引/HEAD（例如把 `.gitmodules` 单独 commit、或 `git rm --cached` 子模块）。
+本地 `git status` 只把该目录显示成**未跟踪**，看不出异常。**实测**新克隆的后果：
+
+| 状态 | 新克隆后 `git submodule status` | 子模块目录 | `submodule update --init` 退出码 |
+| --- | --- | --- | --- |
+| 半套接入（未修） | **空**（git 完全不认识该路径） | **不存在** | **0（不报错、也不检出）** |
+| 已补登 | `<sha> sub (vX.Y.Z)` | 存在 | 0 |
+
+即：**不报错、静默不检出**，直到构建时才发现引擎脚本缺失。`--apply` 会自动补登：
+`git add -- <子模块路径>`（对嵌仓库即写模式 `160000`）+ 本地 commit；若该子模块当前 HEAD 落后于目标，
+会先 `fetch` + `checkout --detach <目标>` 再补登（一条命令同时完成「补登 + 对齐」）。
+**仅为真正的子模块 checkout 补登**（判据：其 git dir 落在宿主 `.git/modules/` 下）——
+vendored 副本 / 嵌套仓库不会被误补登，而是被报为 `not-a-submodule` 并提示走 `git submodule add`。
+`uncommitted-gitlink` 属「人已 stage、只差 commit」，**不自动处理**（避免猜测人的意图）。
+
+**退出码**：`0` = 一致或全部成功；`2` = 存在落后 / 半套接入 / 需人工介入（仅 `--check` 语义）；`1` = 执行出错。
+**JSON `status` 取值**：`ok` / `outdated` / `unregistered` / `attention` / `error`（`unregistered` 为 v1.3.0 新增）。
 **前置依赖**：`jq`（硬依赖，启动即校验）、`git`。
 
 ```bash
@@ -448,3 +469,12 @@ bash sync-hosts.sh --install-hook --auto    # 可选：发布时自动跟随（�
 | 1 | 静态检查扫出两处**真实**缺陷 | `link-skill.sh:76`（软链冲突提示会丢路径）、`pgy_upload.sh:422`（不支持的输入类型报错会丢输入路径）。均为**文案**，不影响控制流 | 改为 `${VAR}`（各 1 行）；记 CR-006（无版本变更）。`pgy_upload.sh:37/568/751` 的同类命中都在注释里，不展开、无需改 |
 | 2 | **归因订正**（重要） | 本项目此前记为「**bash 3.2** 在多字节字符前会吞掉变量名」（`execution-log.json` → run-20260919-hosts-sync-and-browser-consolidation）。字节级实测**恰好相反**：`/bin/bash` 3.2.57 正确输出 `[abc\357\274\211tail]`，`/opt/homebrew/bin/bash` 5.3.15 输出 `[\274\211tail]`（值消失 + 字节错位）。根因是 **bash ≥ 5.2 的变量名解析支持多字节字符**；显式 `LC_ALL=C` 不触发，而本机 `LANG="" LC_CTYPE=C` 形态下 5.3 仍触发 | 新增 L-011 记录正确机制与订正说明；在 CR-006 中显式标注「修法不变、归因反转」，避免后人按错方向排障 |
 | 3 | **验证盲区**：单解释器验证 | 本项目脚本 shebang 为 `/bin/bash`（3.2.57），但此前一律用 `bash xxx.sh` 验证（PATH 首位 = Homebrew bash 5.x）。两个大版本语言特性不同 | 自本版起，逐文件语法与关键行为**双解释器各跑一遍**（3.2 + 5.x）；已写入 L-011 推广段。`sync-hosts.sh --check` 在两者下输出与退出码一致（已实测） |
+
+### 9.5 2026-09-19 v1.3.0 校准（`unregistered-gitlink` 补登 + tab 折叠串列）
+
+| # | 事项 | 判定 | 处理方式 |
+| --- | --- | --- | --- |
+| 1 | `unregistered-gitlink` 的危害描述失准 | 实现初稿把后果写成「`git submodule update --init` 会失败（硬故障）」。实测**不是失败**：该命令**退出码 0、不报错、也不检出**，克隆里子模块目录根本不出现 → 属**静默**失效（对构建的破坏更晚、更难查） | 订正脚本头部注释、状态采集处注释与 `--check` 提示文案；并把 A/B 实测表写入 §3.3 |
+| 2 | **`--apply` 存在 tab 折叠导致的整行串列**（既有缺陷，被新状态照出） | rows.tsv 用 `\t` 分隔；`pinned` 为空时写出连续两个 `\t`，而 **tab 属 IFS 空白字符 → bash 的 `read` 把连续分隔符折叠成一个**（jq 的 `split("\t")` 不折叠，故二者行为不同）。结果：`--apply` 循环里其后所有列左移一格 → `state` 变 `N`、ACTION 变 `skip:<dirty值>`，并原样写入 JSON `hosts[]` | 所有列一律写非空占位符（`${pinned:--}`），并在该 printf 上方加注释说明「为何不能有空列」；实测 `not-a-submodule` 宿主在修复前后 ACTION 由 `skip:N` 变为 `skip:not-a-submodule` |
+| 3 | 自动补登的**安全边界** | 若不加限制，`git add` 会把「随手放进目录的 vendored 副本 / 嵌套仓库」也补登成 gitlink——而该 commit 通常不在引擎仓，补登完立刻是 `unknown-engine-commit`，制造假象 | 新增 `is_submodule_checkout()`：仅当子模块的 git dir 落在宿主 `.git/modules/` 下才认定可补登；否则维持 `not-a-submodule` 并提示走 `git submodule add`。反向对照夹具（vendored 副本）已实测不被登记 |
+| 4 | `uncommitted-gitlink` 是否也自动提交 | 该状态是「人已 `git add`、只差 commit」，可能正处于人工编辑中间态 | **刻意不自动处理**，维持人工提示（不猜测人的意图） |

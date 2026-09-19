@@ -27,6 +27,52 @@
 
 ---
 
+## CR-007 — `--apply` 支持自动补登「半套接入」（`unregistered-gitlink`）；修复 tab 折叠导致的整行串列
+
+- **变更时间**：2026-09-19
+- **变更类型**：功能变更 + 缺陷修复
+- **关联版本**：v1.3.0
+- **变更原因**：上一轮真实修复 `xiyu_todo_list` 时发现一种「半套接入」形态——`.gitmodules` **已入库**、目录是合法的子模块 checkout（git dir 在宿主 `.git/modules/` 下），但 **gitlink 既不在索引也不在 HEAD**（`git submodule status` 为空）。本地 `git status` 只把该目录显示成未跟踪，看不出异常；当时只能手工 `git add` + commit 修。工具把该状态判为 `not-a-submodule` 并拒绝处理，属能力缺口。同批被该状态的夹具照出一个**既有缺陷**：`--apply` 的 rows 读回因 tab 折叠而整行串列（详见差异表 2）。
+
+**变更前后差异**
+
+| 项 | 变更前 | 变更后 |
+|----|--------|--------|
+| 状态识别 | 该形态落入 `not-a-submodule`（误导：它不是「没有子模块」，而是「登记不完整」） | 新增独立状态 `unregistered-gitlink`；`--apply` 自动补登 |
+| `--apply` 处理范围 | 仅 `outdated` | `outdated` +（新增）`unregistered-gitlink`；两者共用同一套前置检查（`precheck_actionable` 去重，行为不变） |
+| 补登语义 | — | 落后于目标则先 `fetch` + `checkout --detach <目标>` 再补登（一条命令完成「补登 + 对齐」）；`ahead` 则按当前 HEAD 补登；`unknown`/`diverged` 只补登并提示版本关系未定 |
+| 补登安全边界 | — | 新增 `is_submodule_checkout()`：仅当子模块 git dir 落在宿主 `.git/modules/` 下才补登。vendored 副本 / 嵌套仓库不被误补登，仍报 `not-a-submodule` 并提示走 `git submodule add` |
+| `.gitmodules` 尚未入库时 | — | 一并纳入本次提交（pathspec 含 `.gitmodules`）；已在 HEAD 时不动它（实测提交恰为 1 行 gitlink 变更） |
+| JSON `summary` | `{total, outdated, ahead_of_target, attention}` | 增加 `unregistered` 字段 |
+| JSON `status` | `ok` / `outdated` / `attention` / `error` | 增加 `unregistered`（在 `outdated` 之后、`attention` 之前判定） |
+| `--check` 退出码 | `OUTDATED>0` 或 `ATTENTION>0` → `2` | 增加 `UNREG>0` → `2`（属「可自动处理」，与 `outdated` 同级） |
+| **缺陷：rows 串列** | `pinned` 为空时写出连续两个 `\t`；**tab 属 IFS 空白字符 → bash 的 `read` 把连续分隔符折叠成一个**（jq 的 `split("\t")` 不折叠，二者行为不同）→ `--apply` 循环内其后所有列**左移一格**：`state` 变成 `N`、ACTION 变成 `skip:<dirty值>`，并原样写入 JSON `hosts[]` | 所有列一律写非空占位符 `-`（`${pinned:--}`），并在 printf 上方加注释说明「为何不能有空列」。实测 `not-a-submodule` 宿主：`skip:N` → `skip:not-a-submodule` |
+| `--check` 提示 | 无该状态的专门提示 | 单独列出（该状态本地极易漏看），文案含实测结论：**新克隆会静默缺少该子模块**（`update --init` 退出码 0、不报错、不检出） |
+
+**影响范围**：`sync-hosts.sh`（状态机 / `--apply` / JSON / 退出码 / 提示文案）；`STATUS.md`（能力 C13、§3.3、§9.5）；`README.md`（跟随同步章节）；`changelog/v1.3.0.md`。**不影响**宿主调用链（`archive_upload.sh` / `pgy_upload.sh` / `link-skill.sh` 零改动）。
+
+**兼容性说明**：向后兼容。新增状态值与 JSON 字段为**追加**语义；`--check` 退出码 `2` 的含义由「有落后/需人工介入」扩为「有落后 / 半套接入 / 需人工介入」——消费者若把 `2` 解读为「执行 `--apply` 即可」，行为**更**准确（这类项目确实可被 `--apply` 修复）。
+**注**：`uncommitted-gitlink`（人已 `git add`、只差 commit）**刻意不自动处理**，维持人工提示，避免猜测人的意图。
+
+**验证方式**：
+
+```bash
+# 1) 静态：双解释器语法 + CJK 花括号（排除注释）
+for f in sync-hosts.sh archive_upload.sh pgy_upload.sh link-skill.sh; do
+  /bin/bash -n "$f" && /opt/homebrew/bin/bash -n "$f"; done
+
+# 2) 夹具 A/B（/tmp/pgy-unreg*）：构造 4 种宿主形态
+#    host-a 半套接入(子模块=引擎HEAD) / host-b 半套接入+落后 / host-c .gitmodules 声明了 vendored 副本 / host-d 正常
+PGY_SYNC_REGISTRY=/tmp/pgy-unreg/hosts.json bash sync-hosts.sh --check          # 退出码 2；host-c 判 not-a-submodule
+PGY_SYNC_REGISTRY=/tmp/pgy-unreg/hosts.json bash sync-hosts.sh --apply          # a/b 补登；c/d 跳过
+# 3) 新克隆对照（决定性）：修复前 clone → submodule 目录不存在（静默）；修复后 clone → sub/ 存在且 pin 正确
+# 4) 边界：宿主脏 / 子模块脏 → 跳过；--allow-dirty → 处理且不卷入宿主其它改动；
+#          --allow-downgrade → 未登记+ahead 也按目标补登；--no-commit → registered-staged；连跑两次幂等
+# 5) 反向对照：host-c 的 vendored 目录 `git ls-files -s -- vend` 为空（未登记）
+```
+
+---
+
 ## CR-006 — 修复两处「变量后紧跟全角字符」导致的文案丢失（并订正 bash 版本归因）
 
 - **变更时间**：2026-09-19
