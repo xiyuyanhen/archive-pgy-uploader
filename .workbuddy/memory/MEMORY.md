@@ -86,13 +86,25 @@
   「空输出」有两种含义，必须用退出码区分：`rc=0 且空` = 确实没有；`rc≠0` = **无法判定**。
   `2>/dev/null` 只允许用在「失败有明确无害默认值」处（如 `rev-parse --quiet x 2>/dev/null || true`）。
 
-## 远端状态的可核实性（2026-09-19 校准，CR-008）
-- **本机沙箱无法核实任何远端状态**：`ls-remote` / `push` / 私有远端 `clone` 都需要凭证，
-  而 sandbox 里 `credential.helper=osxkeychain` 无法解锁、也没有交互终端 →
-  报错形态是 `fatal: could not read Username for 'https://codeup.aliyun.com': Device not configured`（退出码 128）。
-  **凡结论依赖远端查询，必须声明「未能核实」并交回用户在有凭证的终端执行**，不得当成「确实没有」。
+## 远端状态的可核实性（2026-09-19 校准，CR-008 + CR-009 收窄）
+- **本机沙箱无法核实「私有」远端的状态**（CR-009 订正了 CR-008 的「任何远端」过度概括）：
+  `ls-remote` / `push` / 私有 `clone` 都需要凭证，而 sandbox 里 `credential.helper=osxkeychain`
+  无法解锁、也没有交互终端 → 报错形态是
+  `fatal: could not read Username for 'https://codeup.aliyun.com': Device not configured`（退出码 128）。
+  私有远端实测 **HTTP 401**（服务可达、拒绝授权）——**别把 401 当成「网络不通」**，该查凭证而不是查网络。
+- **公开远端可以匿名核实**：`git ls-remote https://github.com/git/git 'refs/tags/v2.43.0'`
+  → `rc=0` + 真实 tag SHA（无需凭证，直连与经镜像一致）。
+  → 所以「换成 GitHub 远端能否查标签」的答案是：**公开仓能、私有仓不能**（沙箱无 GitHub 凭证通道：
+  `gh` 未装、无 `GITHUB_TOKEN`/`GH_TOKEN`/`GIT_TOKEN`/`GITHUB_PAT`、无 `~/.config/gh/hosts.yml`）。
+- **判据活样例**：`rc=0 且输出为空` = 确实没有；`rc≠0`（哪怕输出为空）= **无法判定**（L-014）。
+- **本机全局 `url.*.insteadOf` 同时改写 fetch 与 push**（无独立 `pushInsteadOf` 时）：
+  `https://github.com/` → `https://ghfast.top/https://github.com/`，即**推送凭证会经第三方加速镜像**。
+  判断远端地址必须用 `git remote get-url --push <remote>` 看**实际生效** URL，不能只看 `git remote -v` 字面值。
+  （另有 `url.file:///tmp/SDWebImage.insteadof https://github.com/SDWebImage/SDWebImage.git`，而 `/tmp/SDWebImage` 不存在 → 该库拉取异常时先查此规则。）
 - **分支状态可本地反推，标签状态不可**：
   - `git push` 会更新远程跟踪引用 → 分支可用 `git rev-list --left-right --count origin/<b>...HEAD`
     与 `git reflog show origin/<b>`（`update by push`）本地判断。
   - **push 标签不产生任何本地引用** → 「标签推没推」只能查远端。
+- **换远端地址的连带影响**：`--target origin` 走 `symbolic-ref refs/remotes/origin/HEAD`、缺失回落 `origin/master`
+  （`sync-hosts.sh:422-423`）→ 换 URL 后未 `git fetch` 前，`origin/master` 是**旧远端**的陈旧值，脚本不崩但会给**过期目标**。
 - 这类会随时间变化的事实（推送状态、远端引用）写进记忆时**必须带核实方式与时间点**，否则很快变成误导。

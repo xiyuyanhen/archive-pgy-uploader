@@ -586,10 +586,21 @@ git ls-remote --tags origin; echo "rc=$?"       # 看 rc 与是否出现 refs/ta
 1. **判定性**命令（用来下结论的）**一律不许 `2>/dev/null`**；`2>/dev/null` 只允许用在
    「失败有明确无害默认值」的地方（例如 `git rev-parse --quiet x 2>/dev/null || true` 取可选值）。
 2. 见到「空结果」先问一句：**这是「查到了、为空」，还是「没查成」？** 两者必须由退出码区分。
-3. 沙箱 / 非交互环境的凭证限制要**在写结论前**就想清楚：`ls-remote` / `push` / `clone` 私有远端
-   在此环境下大概率不可用，凡结论依赖它们，必须声明「未能核实」而不是给出确定答案。
+3. 沙箱 / 非交互环境的凭证限制要**在写结论前**就想清楚——但要区分「**无法访问**」与「**无法核实**」：
+   - **公开**远端（如 GitHub 公开仓）**可以**匿名查询：实测 `git ls-remote https://github.com/git/git 'refs/tags/v2.43.0'`
+     返回 `rc=0` 并取到真实 tag SHA，**无需任何凭证**（直连与经镜像均可）。
+   - **私有**远端会拿到 `HTTP 401` → git 转而索要用户名 → 无可用 helper / 无交互终端 → **退出码 128**。
+     本机 codeup 的 `info/refs` 实测正是 **HTTP 401**（即**网络是通的**，纯粹缺凭证）。
+   - 因此准确表述是「**本机沙箱无法核实私有远端的任何状态**」；本条初稿写的
+     「沙箱无法核实任何远端状态」是**过度概括**，现予订正。
+   - 凡结论依赖**私有**远端的查询，必须声明「未能核实」并交回有凭证的终端执行。
 4. 本仓 `sync-hosts.sh` 已核实**不依赖网络**（无 `ls-remote` / `fetch origin`；`--apply` 只从本地
    `$ENGINE_DIR` 取对象），故不受此条影响。反过来说：**工具也不会替你确认标签是否已 push**（`OPEN-005`）。
+5. **本机全局 `url.*.insteadOf` 会悄悄改写 URL，且 `insteadOf` 同样作用于 push**（只有 `pushInsteadOf`
+   才专门区分推送）。本机实测：`https://github.com/foo/bar.git` 的 `get-url` 与 `get-url --push`
+   **都**变成 `https://ghfast.top/https://github.com/foo/bar.git`。凡涉及「远端地址」的判断
+   （尤其安全判断：凭证会发给谁），必须用 `git remote get-url --push <remote>` 看**实际生效的 URL**，
+   而不是看 `git remote -v` 里存的字面值。
 
 ---
 

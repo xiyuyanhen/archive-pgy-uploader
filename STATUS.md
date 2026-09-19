@@ -487,3 +487,22 @@ bash sync-hosts.sh --install-hook --auto    # 可选：发布时自动跟随（�
 | 1 | 「远端没有标签」的结论未经核实 | 该结论由**查询失败**（`ls-remote` rc=128）的空输出推出，属「把失败误读成判断依据」（同族：L-009）。它让结论**反向**，且**看起来证据充分**（命令跑了、输出为空、无可见报错） | 订正记忆中的陈述为「**无法判定**，需使用者在有凭证的终端核实」；新增 L-014 记录判据与推广（判定性命令禁止 `2>/dev/null`） |
 | 2 | 提交是否已 push | **是**：`origin/master == HEAD == 9d3aa18`，且 reflog 最新一条为 `9d3aa18 refs/remotes/origin/master@{0}: update by push`。此前记忆里「领先 1 个提交」已过期 | 更新记忆为「已 push」；并在 L-014 中记录「分支状态可本地反推、标签状态不可」 |
 | 3 | 脚本是否受同类风险影响 | **否**：已核实 `sync-hosts.sh` 无 `ls-remote` / `fetch origin`，`--apply` 只从本地 `$ENGINE_DIR` 取对象，全程离线可用 | 无需改动；但须明确「工具也不会替你确认标签是否已 push」（`OPEN-005`） |
+
+### 9.7 2026-09-19 校准（CR-009：远端可核实性的实测边界 + 本机全局 URL 重写）
+
+| # | 事项 | 判定 | 处理方式 |
+| --- | --- | --- | --- |
+| 1 | L-014 的「沙箱无法核实**任何**远端状态」是过度概括 | 实测：**公开**远端可**匿名**查询——`git ls-remote https://github.com/git/git 'refs/tags/v2.43.0'` 返回 `rc=0` 与真实 tag SHA（直连与经镜像结果一致）。故准确表述是「无法核实**私有**远端的任何状态」 | 订正 L-014 第 3 条（区分「无法访问」与「无法核实」）；本节留痕 |
+| 2 | 私有远端的失败形态有确切证据 | 本机 codeup 的 `info/refs?service=git-upload-pack` 返回 **HTTP 401** → 即**网络是通的**，纯粹缺凭证（此前只能推断） | 记入 L-014 第 3 条；`OPEN-005` 的处置补充见下 |
+| 3 | 沙箱内是否有 GitHub 凭证通道 | **无**：`gh` 未安装、`GITHUB_TOKEN`/`GH_TOKEN`/`GIT_TOKEN`/`GITHUB_PAT` 均未设置、`~/.config/gh/hosts.yml` 不存在 | 记录为事实；故「切到私有 GitHub 仓」仍不能解决沙箱核实问题 |
+| 4 | 本机全局 `url.*.insteadOf` 会**同时改写 fetch 与 push** | 全局配置含 `url.https://ghfast.top/https://github.com/.insteadof https://github.com/`。仅设 `insteadOf`（无独立 `pushInsteadOf`）→ 临时仓库实测 `get-url` 与 `get-url --push` **都**变成 `ghfast.top/...`。含义：若把本仓远端指向 GitHub，**推送凭证会经第三方加速镜像** | 记入 L-014 第 5 条：涉及远端地址的判断（尤其安全判断）必须用 `git remote get-url --push <remote>` 看**实际生效** URL，不能只看 `git remote -v` 的字面值。切换远端前需先评估/处理该重写 |
+| 5 | 另一条全局规则指向不存在的本地路径 | `url.file:///tmp/SDWebImage.insteadof https://github.com/SDWebImage/SDWebImage.git`，而 `/tmp/SDWebImage` **当前不存在**（`/tmp` 重启即清）→ 任何对 SDWebImage 的取用会被改写到 `file:///tmp/SDWebImage` 并失败，报错信息与「远端不可达」无关 | 留档备查（不属本仓改动）；若日后遇到 SDWebImage 相关拉取异常，先查这条规则 |
+| 6 | `--target origin` 在换远端后的行为 | 脚本用 `symbolic-ref refs/remotes/origin/HEAD`，缺失时回落 `origin/master`（已核实代码路径：`sync-hosts.sh:422-423`）；但**换 URL 后未 fetch 之前，`origin/master` 仍是旧远端的陈旧值**，脚本不会崩、却可能给出**过期的目标** | 记入本文档；切换远端后应先 `git fetch`（并 `git remote set-head origin -a` 或确认 `origin/HEAD`）再使用 `--target origin` |
+
+**`OPEN-005` 处置补充（本条不改变其 `by-design` 状态，仅收窄可执行的规避步骤）**
+
+本轮实测把 `OPEN-005` 的规避方案从一句「需人工 push」细化成三步，**根因不变**（本机沙箱无私有远端凭证，push 与标签确认只能由使用者完成）：
+
+1. **push 标签后无法在本机自证**——`git push` 只更新远程跟踪引用（分支可反推），**push 标签不产生任何本地引用**，故「标签推没推」只能查远端。`sync-hosts.sh` 也不代查（无 `ls-remote`），即**工具永远不会替你确认 release 标签是否已 push**。
+2. **远端换成公开 GitHub 仓可解，换成私有仓不可解**——沙箱对**公开**仓可匿名 `ls-remote` 自证；**私有**仓（含私有 GitHub 仓）仍为 `HTTP 401 → rc 128`，因沙箱无任何 GitHub 凭证通道（`gh` 未装、无 token 变量、无 `hosts.yml`）。
+3. **换远端地址前先处理全局 `insteadOf` 重写**——本机全局规则会把 `https://github.com/` 改写为 `https://ghfast.top/https://github.com/`，且该重写**同时作用于 push**。这意味着改远端后**推送凭证会经第三方加速镜像**；同时未 `git fetch` 前 `origin/master` 是旧远端的陈旧值，会让 `--target origin` 给出过期目标。切换远端后请按 §9.7 第 6 行先 `git fetch`、并用 `git remote get-url --push origin` 确认实际生效 URL。

@@ -27,6 +27,54 @@
 
 ---
 
+## CR-009 — 校准：远端可核实性的实测边界（公开可查 / 私有 401）与本机全局 URL 重写的影响
+
+- **变更时间**：2026-09-19
+- **变更类型**：校准修正（**无版本变更**）
+- **关联版本**：无
+- **变更原因**：CR-008 的 L-014 把结论写成「沙箱**无法核实任何**远端状态」——这是**过度概括**。
+  为回答「把远端换成 GitHub 后能否查到标签状态」，本轮做了实测，结论需要收窄为「**私有**远端无法核实」，
+  并顺带发现本机全局 git 配置会**改写 push URL**（对「凭证发给谁」有安全含义）。
+
+**实测结果**
+
+| 测试 | 命令 | 结果 |
+| --- | --- | --- |
+| 公开仓匿名查询（直连，绕过全局配置） | `GIT_CONFIG_GLOBAL=/dev/null git ls-remote https://github.com/git/git 'refs/tags/v2.43.0'` | `rc=0`，返回真实 tag SHA |
+| 公开仓匿名查询（走本机现有配置） | `git ls-remote https://github.com/git/git 'refs/tags/v2.43.0'` | `rc=0`，**同一 SHA**（经镜像无差异） |
+| 「确实没有该标签」的活样例 | `git ls-remote https://github.com/git/git 'refs/tags/v9.9.9-does-not-exist'` | `rc=0` 且 stdout 为空、stderr 为空 |
+| 私有远端（本机 codeup） | `curl -o /dev/null -w '%{http_code}' .../info/refs?service=git-upload-pack` | **HTTP 401**（网络通，纯粹缺凭证） |
+| 沙箱内 GitHub 凭证通道 | `command -v gh` / `GITHUB_TOKEN` 等 / `~/.config/gh/hosts.yml` | 均无 → 私有仓不可查 |
+| `insteadOf` 是否作用于 push | `git remote get-url --push <remote>`（临时仓库实测） | **是**：`https://ghfast.top/https://github.com/foo/bar.git` |
+
+**变更前后差异**
+
+| 项 | 变更前（CR-008 的表述） | 变更后（收窄后的准确表述） |
+|----|--------|--------|
+| 沙箱可核实性 | 「无法核实**任何**远端状态」 | 「无法核实**私有**远端的任何状态」；**公开**远端可匿名查询（已实测） |
+| 换成 GitHub 能否查标签 | 未讨论 | **公开仓：能**（沙箱已实测公开仓 `ls-remote` 成功）；**私有仓：不能**（401 → 无凭证 → rc 128） |
+| 本机全局配置的影响 | 未涉及 | 记录 `url.https://ghfast.top/https://github.com/.insteadof https://github.com/` 会同时改写 **fetch 与 push**（无独立 `pushInsteadOf`）→ 切远端前须评估凭证流向；并对「`/tmp/SDWebImage` 本地规则指向不存在的路径」留档 |
+| 远端地址的判读方式 | 未说明 | 必须用 `git remote get-url --push <remote>` 看**实际生效** URL，不能只看 `git remote -v` 的字面值 |
+
+**影响范围**：仅文档/记忆——`experience/LESSONS.md`（L-014 第 3、5 条订正/补充）、`STATUS.md`（§9.7、`OPEN-005` 处置补充）、
+`changelog/CHANGES.md`、`experience/execution-log.json`、`.workbuddy/memory/`。**脚本零改动**。
+
+**兼容性说明**：无行为变化，**不升版本、不打标签**（宿主仍 pin `v1.3.0`）。
+
+**验证方式**：
+
+```bash
+# 公开仓可匿名查询（无需凭证）
+git ls-remote https://github.com/git/git 'refs/tags/v2.43.0'; echo "rc=$?"
+# 私有仓的失败形态（401 → rc 128）
+curl -sS -o /dev/null -m 15 -w '%{http_code}\n' \
+  "https://codeup.aliyun.com/61c852431ccc3a1faae0a9fa/scripts/archive-pgy-uploader.git/info/refs?service=git-upload-pack"
+# 实际生效的 push URL（会被 insteadOf 改写）
+git remote get-url --push origin
+```
+
+---
+
 ## CR-008 — 校准：订正「远端无标签」的错误结论，并沉淀「空结果 vs 查询失败」判据（L-014）
 
 - **变更时间**：2026-09-19

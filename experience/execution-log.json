@@ -283,6 +283,45 @@
       "changes": ["CR-008"],
       "open_issues_opened": [],
       "lessons_added": ["L-014"]
+    },
+    {
+      "run_id": "run-20260919-remote-queryability-calibration",
+      "date": "2026-09-19",
+      "project_version": "1.3.0",
+      "task": "校准：实测「沙箱能否核实远端状态」的边界（公开 vs 私有），并查清本机全局 URL 重写对 push 的影响",
+      "outcome": "success",
+      "summary": "使用者问「把本仓远端换成 GitHub 后，你能否查到标签状态？」。CR-008 的 L-014 此前写成「沙箱无法核实任何远端状态」，属过度概括；本轮做实测收窄为「无法核实**私有**远端」——公开远端可**匿名**查询（`git ls-remote https://github.com/git/git 'refs/tags/v2.43.0'` → rc=0 + 真实 SHA，直连与经镜像一致），私有远端则 `HTTP 401` → rc=128。同时发现本机全局 `url.https://ghfast.top/https://github.com/.insteadof https://github.com/` 在**仅设 insteadOf、无独立 pushInsteadOf** 时会**同时改写 fetch 与 push**，对「推送凭证会发给谁」有安全含义，直接决定「换远端」这个操作是否安全。脚本零改动，仅文档/记忆层订正。",
+      "findings": [
+        "【边界收窄】准确表述是「本机沙箱无法核实**私有**远端的任何状态」，而非「无法核实任何远端」。这不是措辞问题而是可操作性问题：公开仓在沙箱里**能**自证（无需任何凭证），私有仓不能——前者决定了「换 GitHub 远端」能否解决核实问题，后者说明换到私有 GitHub 仓并不解决。",
+        "【可判定的失败形态】私有远端的失败不是「网络不通」：对 codeup `info/refs?service=git-upload-pack` 直接 curl 得到 **HTTP 401**（服务可达，拒绝授权）→ git 转而索要用户名 → 无 helper / 无交互终端 → rc=128。把 401 与「不可达」混为一谈会误导排查方向（去查网络而不是查凭证）。",
+        "【活样例】「确实没有该标签」应表现为 rc=0 且 stdout/stderr 皆空（实测 `refs/tags/v9.9.9-does-not-exist`）。有了活样例，L-014 的判据从「靠退出码区分」升级为「两端都有实测参照物」：一端 rc=0+空，另一端 rc=128+stderr。",
+        "【安全弦】`url.*.insteadOf` 在没有独立 `pushInsteadOf` 时**同样作用于 push**（临时仓库实测 `get-url` 与 `get-url --push` 都变成 ghfast.top 前缀）。含义：把远端指向 GitHub 后，**推送凭证会经第三方加速镜像**。故「远端地址」不能只看 `git remote -v` 的字面值，必须用 `git remote get-url --push <remote>` 看实际生效 URL。这是从「能不能查标签」这个看似纯技术问题里带出来的安全副产品。",
+        "【环境事实】沙箱内**无** GitHub 凭证通道：`gh` 未安装、`GITHUB_TOKEN`/`GH_TOKEN`/`GIT_TOKEN`/`GITHUB_PAT` 均未设置、`~/.config/gh/hosts.yml` 不存在。故「换到 GitHub」只在**公开**仓前提下有效。",
+        "【二阶影响】换远端会连带影响 `--target origin`：脚本按 `symbolic-ref refs/remotes/origin/HEAD` 解析、缺失回落 `origin/master`（已核实：sync-hosts.sh:422-423）。换 URL 后未 fetch 前 `origin/master` 仍是**旧远端**的陈旧值——脚本不崩，但会给出**过期目标**（静默给错结论，与 L-009 / L-014 同族）。",
+        "【遗留留档】另有一条全局规则 `url.file:///tmp/SDWebImage.insteadof https://github.com/SDWebImage/SDWebImage.git` 指向**不存在**的 `/tmp/SDWebImage`（/tmp 重启即清）。日后若遇 SDWebImage 拉取异常，报错与「远端不可达」无关，应先查此规则。"
+      ],
+      "evidence": {
+        "commits": []
+      },
+      "artifacts": {
+        "files": [
+          "experience/LESSONS.md",
+          "STATUS.md",
+          "changelog/CHANGES.md",
+          "changelog/CHANGELOG.md",
+          "experience/execution-log.json"
+        ],
+        "tags": [],
+        "external": {
+          "not_done": [
+            "本仓远端**尚未**切换到 GitHub（本轮只回答问题、未改 origin），故 origin/master=2dbc1a0 仍是 codeup 的引用",
+            "v1.1.0 / v1.2.0 / v1.3.0 是否已 push 到 codeup 仍**无法判定**（沙箱无私有远端凭证），需使用者执行 `git ls-remote --tags origin; echo rc=$?`"
+          ]
+        }
+      },
+      "changes": ["CR-009"],
+      "open_issues_opened": [],
+      "lessons_added": []
     }
   ]
 }
