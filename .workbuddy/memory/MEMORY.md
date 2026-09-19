@@ -56,3 +56,11 @@
 - **钩子只能当兜底**：git 无 `post-tag`，常规顺序「先 commit 后 tag」下 `post-commit` 永不触发 → `--auto` 改为「仅 HEAD 正好是发布标签时才 apply」。别指望钩子完成发布同步。
 - **push 一律由用户主导**（本机沙箱无 codeup 凭证，见 `OPEN-005`）。**标签也必须 push**，否则他人 / 新克隆看不到 release 目标。
 - 评估结论（勿反复推翻）：**软链共享只适合「暴露层」**（如 `link-skill.sh` 注册技能），不适合承载引擎共享——会让所有宿主共享同一工作区，失去版本锚点与并行版本能力，且 `rm -rf <link>/` 会穿透删中央实体。
+
+## shell 脚本约定（本仓所有 `*.sh` 必须遵守）
+
+- **变量后紧跟全角/CJK 字符一律写 `${VAR}`**：根因是 **bash ≥ 5.2 的变量名解析支持多字节字符**（`"$V）"` 会被当成一个变量名 → 值展开为空 + 字节错位）。**bash 3.2.57 反而正常**（曾误记为「3.2 吞变量名」，已订正为 L-011）。
+- **双解释器验证**：macOS 上 `./x.sh` 走 shebang `/bin/bash`（3.2.57），`bash x.sh` 走 PATH 首位（本机 `/opt/homebrew/bin/bash` 5.3.15）。语法与关键行为**两个都要跑**，只测一个不算通过。
+- 静态检查（排除注释）：
+  `python3 -c "import re,pathlib;pat=re.compile(r'\\\$([A-Za-z_][A-Za-z0-9_]*)(?=[^\x00-\x7f])');[print(f'{f}:{i}') for f in ['sync-hosts.sh','link-skill.sh','archive_upload.sh','pgy_upload.sh'] for i,l in enumerate(pathlib.Path(f).read_text().splitlines(),1) if not l.lstrip().startswith('#') and pat.search(l)]"`
+- `set -euo pipefail` 下慎用 `工具 | grep -q` / `| head -1`（读端提前退出 → 写端 SIGPIPE 141 → 条件反向判假），见 L-009。
