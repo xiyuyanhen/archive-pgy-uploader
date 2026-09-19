@@ -604,6 +604,61 @@ git ls-remote --tags origin; echo "rc=$?"       # 看 rc 与是否出现 refs/ta
 
 ---
 
+## L-015 — `git clone --no-checkout` **不建索引** → `ls-files` 恒为空、`submodule` 报 pathspec 不存在，极易被读成「gitlink 未登记」
+
+| 字段 | 值 |
+| --- | --- |
+| **状态** | `verified` |
+| **引入版本** | 1.3.0 |
+| **关联执行** | `run-20260920-migrate-hosts-submodule-url` |
+| **场景** | 需要「全新克隆」验证子模块接入是否成立（新克隆能否按 `.gitmodules` 拉到引擎）时，为了省流量/时间用 `--no-checkout` |
+
+**问题**：在 `--no-checkout` 克隆出来的仓库里做验证，得到的是**误导性结果**：
+
+```console
+$ git config -f .gitmodules --get 'submodule.<path>.url'
+# （无输出，rc=1）
+$ git ls-files -s -- <path>
+# （无输出）
+$ git submodule update --init -- <path>
+error: pathspec '<path>' did not match any file(s) known to git
+```
+
+表面读法：「`.gitmodules` 读不到、gitlink 不在索引里、子模块命令报错」→ 结论「接入是半套的 / gitlink 未登记」。
+**该结论是错的**：同一 commit 在正常克隆里一切正常，`git ls-files -s` 正是 `160000 <sha> 0 <path>`。
+
+**根因**：`git clone --no-checkout` **只写 `.git` 对象库，不建立索引**（也不落工作区文件）。而：
+
+- `git ls-files` 读的是**索引**，不是 HEAD → 空索引 → **恒定空输出**（与仓库内容无关）；
+- `git config -f .gitmodules` 读的是**工作区文件** `.gitmodules` → 文件没落盘 → `rc=1`；
+- `git submodule update --init -- <path>` 需在索引里按 pathspec 定位 gitlink → 找不到。
+
+即：**「前置状态未建立」被读成了「事实不存在」**。与 L-014 同属「空结果被当成结论」的家族，
+但**根因不同**——L-014 是主动丢了 stderr（把失败伪装成空），本条是**验证前没把被测环境建成**，
+命令**诚实、完整地报了空**，是**观察者**的推理错了。
+
+**解法**（任选其一）：
+
+```bash
+# 方案 A：克隆后先建索引（省流量，推荐用于大仓）
+git clone --no-checkout <host> probe && cd probe
+git read-tree HEAD                      # ← 关键：把 HEAD 的树读进索引
+git ls-files -s -- <sub>                 # 现在应为: 160000 <sha> 0 <sub>
+git checkout HEAD -- .gitmodules         # submodule 命令需要工作区有 .gitmodules
+git submodule update --init -- <sub>
+
+# 方案 B：直接正常克隆（不要 --no-checkout），索引与工作区都由 git 建好
+git clone <host> probe && cd probe && git submodule update --init -- <sub>
+```
+
+**判据**：看到「`ls-files` 为空」时，**先问「索引建了吗」**（`git read-tree` 是否跑过 / 是否用了 `--no-checkout`），
+再怀疑接入缺陷。判「真缺陷」（L-013 的 `unregistered-gitlink`）仍以 `160000` 为准，但环境必须先成立，否则得到的是假阳性。
+
+**保留的既有经验**：本条目**补充** L-013（`.gitmodules` 入库但 gitlink 未登记）与 L-014（空结果 vs 查询失败），
+不替代任何条目。三条共同构成「判定前先确保**观察成立**」：L-014 保住**错误信息**，本条保住**前置状态**，L-013 守住**判据本身**。
+
+---
+
 ## L-NNN — <一句话标题>
 
 | 字段 | 值 |

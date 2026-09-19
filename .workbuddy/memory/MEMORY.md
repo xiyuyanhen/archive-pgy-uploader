@@ -27,7 +27,11 @@
    - 因引擎默认 `--scheme Runner`/`Runner.xcworkspace`，须加**项目专属包装脚本**（如 `archive_and_upload.sh`）预置 `--workspace *.xcodeproj --scheme <本scheme> --config pgy_config.sh`，让 AI/CLI 一条命令跑通。
    - ~~sandbox 无法推 codeup 远程时，用**复制引擎文件**代替 submodule~~ → **已废弃**（CR-003）：复制会失去版本锚点并漂移（WebBrowser 曾因此连引擎版本都说不清）。
      正确做法：用 `git -c protocol.file.allow=always submodule add <本地引擎路径> <路径>` 从本地路径克隆，**随后把 `.gitmodules` 与 `.git/modules/.../config` 的 url 改回远端地址**（无需网络凭证即可完成 submodule 接入）。
-    ⚠️ 3 个宿主的 `.gitmodules` 目前仍写 **codeup** 地址，与引擎新 GitHub `origin` **分叉**（新克隆宿主从 codeup 拉引擎，而引擎新提交推 GitHub）→ 见 `OPEN-006`，待决策。
+    ✅ **3 个宿主已于 2026-09-20 整体迁移**（原 `OPEN-006` 已关闭）：`.gitmodules` 与 `submodule.<name>.url` 均改指
+    `https://github.com/xiyuyanhen/archive-pgy-uploader.git`（**HTTPS 而非 SSH**——公开仓克隆不需凭证，且与原 codeup 同为 HTTPS，改动最小），
+    并用 `git submodule sync -- <path>` 同步 `.git/modules/<name>/config`；gitlink 未变，宿主仅 `.gitmodules` 一处改动。
+    宿主侧提交：`xiyuScoreboard 0e69d28` / `xiyu_todo_list 7d2d3ba` / `xiyuWebBrowser 05ee675`（**均未 push**）。
+    **验收方式**：全新克隆宿主 + `git submodule update --init`（见 L-015，`--no-checkout` 需先 `git read-tree HEAD`）。
    - `xcodegen generate` **不要盲目执行**：本机实测会清空 `DEVELOPMENT_TEAM` 并改写 `LD_RUNPATH_SEARCH_PATHS`（pbxproj 与 project.yml 早已不同步，见 L-008）→ 改为就地替换 pbxproj 中那一段 `shellScript`。
 7. **子模块登记必须「两件齐全」**：`.gitmodules` **和** gitlink（索引模式 `160000`）都在 HEAD。
    只提交 `.gitmodules` 会得到 `unregistered-gitlink`——本地看不出来，新克隆**静默**缺少该子模块（L-013）。
@@ -72,6 +76,9 @@
 - **钩子只能当兜底**：git 无 `post-tag`，常规顺序「先 commit 后 tag」下 `post-commit` 永不触发 → `--auto` 改为「仅 HEAD 正好是发布标签时才 apply」。别指望钩子完成发布同步。
 - **push 一律由用户主导**（本机沙箱无可用非交互密钥身份，见 `OPEN-005`）。**标签也必须 push**，否则他人 / 新克隆看不到 release 目标。
   - 换成**公开** GitHub 仓后的好处：标签/分支状态**事后可由沙箱匿名核实**（`git ls-remote https://github.com/xiyuyanhen/archive-pgy-uploader` → `rc=0`），不再只能依赖用户回报。
+    **已兑现（2026-09-20 核实）**：`master`=`98eef5e`、`v1.1.0`/`v1.2.0`/`v1.3.0` 三标签齐备、`v1.3.0^{}`=`dd06073`（与 `STATUS.md` §1 一致）。
+  - **代价**：`origin` 是 SSH 时 `git fetch origin` **只读也用不了**（SSH 认证对读写都要）→ 需用匿名 HTTPS 旁路：
+    `git fetch https://github.com/xiyuyanhen/archive-pgy-uploader.git '+refs/heads/*:refs/remotes/origin/*'` + `git symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/master`。
 - 评估结论（勿反复推翻）：**软链共享只适合「暴露层」**（如 `link-skill.sh` 注册技能），不适合承载引擎共享——会让所有宿主共享同一工作区，失去版本锚点与并行版本能力，且 `rm -rf <link>/` 会穿透删中央实体。
 
 ## shell 脚本约定（本仓所有 `*.sh` 必须遵守）
@@ -112,3 +119,9 @@
 - **换远端地址的连带影响**：`--target origin` 走 `symbolic-ref refs/remotes/origin/HEAD`、缺失回落 `origin/master`
   （`sync-hosts.sh:422-423`）→ 换 URL 后未 `git fetch` 前，`origin/master` 是**旧远端**的陈旧值，脚本不崩但会给**过期目标**。
 - 这类会随时间变化的事实（推送状态、远端引用）写进记忆时**必须带核实方式与时间点**，否则很快变成误导。
+
+## 公开仓内容约定（使用者 2026-09-20 确认）
+- 本仓为**公开** GitHub 仓。`.workbuddy/memory/` 与 `experience/execution-log.json` 中的**内部项目名属测试项目**，
+  用户确认**可继续公开**（跟踪范围不变）。
+- **后续约定：不再提交其它隐私信息**（真实客户名/未公开业务、凭证、个人身份信息、内网地址等）。
+  新增内容前的自检：这份内容愿意被任何人永久读到吗？

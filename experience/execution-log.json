@@ -362,6 +362,51 @@
       "changes": ["CR-010"],
       "open_issues_opened": ["OPEN-006"],
       "lessons_added": []
+    },
+    {
+      "run_id": "run-20260920-migrate-hosts-submodule-url",
+      "date": "2026-09-20",
+      "project_version": "1.3.0",
+      "task": "收尾迁移：核实 push、修正远程跟踪引用、把 3 个宿主子模块地址迁到 GitHub（关闭 OPEN-006）",
+      "outcome": "success",
+      "summary": "使用者完成 push 并选择「整体迁移」。本轮：①匿名核实公开仓状态——master=98eef5e（= 本机 HEAD）、v1.1.0/v1.2.0/v1.3.0 三标签齐备、v1.3.0^{}=dd06073；②修正 codeup 遗留的 origin/master（2dbc1a0 → 98eef5e，差异 0 0）；③3 个宿主的 .gitmodules 与 submodule.<name>.url 改指 GitHub 并 git submodule sync，gitlink 全程未变，各宿主本地提交；④全新克隆宿主 + submodule update --init 端到端证明可匿名解析 dd06073；⑤订正验证方法（--no-checkout 不建索引会伪装成「gitlink 未登记」→ L-015）。OPEN-006 关闭。",
+      "findings": [
+        "【迁移的直接收益兑现】公开仓使「标签推没推」这一长期无法自证的问题**在本仓变得可核实**：匿名 ls-remote 一次拿到 master + 三个标签，且 v1.3.0 的 peeled 引用 dd06073 与 STATUS.md §1 记载一致 → 文档与远端互相印证。这正是 CR-009/CR-010 讨论的落点：可核实性不是抽象属性，它决定「结论能否自证」。",
+        "【SSH 远端的代价显现】origin 是 SSH 但本机无法非交互认证 → **`git fetch origin` 不可用**（连只读取引用也做不了，因为 SSH 认证对读写都要）。修正陈旧 origin/master 时改用匿名 HTTPS 显式 fetch 到 refs/remotes/origin/*，再手工 symbolic-ref 指向 origin/HEAD。**结论：SSH 换来的是「推送凭证不流向镜像」，代价是「只读取用也需要认证」；公开仓则可用 HTTPS 旁路只读。**",
+        "【迁移的充分性判据】改完 .gitmodules 不等于迁移成立——真正的判据是「全新克隆能否按 .gitmodules 解析出引擎」。实测输出 `Submodule ... (https://github.com/xiyuyanhen/archive-pgy-uploader.git) registered` + `checked out 'dd06073…'` + 退出码 0，且全程无凭证（走 ghfast 镜像只读公开仓，无害）。**这是跨仓变更唯一有说服力的验收方式**，比逐仓 grep 强得多。",
+        "【验证方法本身出过错，值得单列】首次验收用 `git clone --no-checkout` 后直接 `git ls-files -s` 与 `git config -f .gitmodules`，得到**空输出 + pathspec 报错**，一度看起来像「gitlink 未登记（半套接入）」。真因是 `--no-checkout` **不建索引**（ls-files 读索引故恒空；.gitmodules 未落盘；submodule 无法按 pathspec 定位）。→ 沉淀 L-015。**这是「空结果被当成结论」的第三次（L-009 管道 / L-014 stderr / L-015 前置状态），但根因各不相同，说明这类错误有多个入口，不能只堵一个。**",
+        "【存储值 vs 生效值在两层同时出现】`.gitmodules` 与 `.git/modules/*/config` 的**存储值**是干净的 https://github.com/...；`git remote get-url` 显示的是被全局 insteadOf 改写的 ghfast 前缀。**报告与排障必须区分这两者**，否则会误判「配置写错了」。对公开仓只读取用，镜像重写不涉及凭证，故无害。",
+        "【跨仓改动的边界】本轮触及 3 个宿主仓，但**只改地址、不动 gitlink、不 push**：gitlink 不变意味着宿主行为零变化（不触发重新 pin），这是把「地址迁移」与「版本同步」两件事解耦的关键；push 仍由使用者主导。"
+      ],
+      "evidence": {
+        "commits": [
+          {"hash": "0e69d28", "subject": "xiyuScoreboard: chore(submodule): 引擎子模块地址由 codeup 迁移至 GitHub 公开仓", "supports": "宿主侧本地提交（未 push）"},
+          {"hash": "7d2d3ba", "subject": "xiyu_todo_list: chore(submodule): 引擎子模块地址由 codeup 迁移至 GitHub 公开仓", "supports": "宿主侧本地提交（未 push）"},
+          {"hash": "05ee675", "subject": "xiyuWebBrowser: chore(submodule): 引擎子模块地址由 codeup 迁移至 GitHub 公开仓", "supports": "宿主侧本地提交（未 push）"}
+        ]
+      },
+      "artifacts": {
+        "files": [
+          "STATUS.md",
+          "changelog/CHANGES.md",
+          "changelog/CHANGELOG.md",
+          "experience/LESSONS.md",
+          "experience/execution-log.json",
+          ".local/hosts.json",
+          ".workbuddy/memory/"
+        ],
+        "tags": [],
+        "external": {
+          "not_done": [
+            "3 个宿主仓的上述提交**未 push**（宿主各自远端；push 由使用者主导）",
+            "引擎本机 HEAD 领先发布标签 v1.3.0（本批为文档变更，按 §8.4 不打标签、宿主不重新 pin）"
+          ]
+        }
+      },
+      "changes": ["CR-011"],
+      "open_issues_opened": [],
+      "open_issues_closed": ["OPEN-006"],
+      "lessons_added": ["L-015"]
     }
   ]
 }

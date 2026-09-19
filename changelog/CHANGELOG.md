@@ -40,6 +40,7 @@
 
 | CR | 日期 | 摘要 | 原因 |
 | --- | --- | --- | --- |
+| CR-011 | 2026-09-20 | 收尾迁移：公开仓使 push **首次可自证**（`master`=`98eef5e`、三标签齐备、`v1.3.0^{}`=`dd06073`）；`OPEN-006` 整体迁移完成——3 个宿主 `.gitmodules` 改指 GitHub（`submodule sync` 同步内部 config，gitlink 未变），宿主侧提交 `0e69d28`/`7d2d3ba`/`05ee675`，并以**全新克隆 + `submodule update --init`** 端到端证明可匿名解析；订正验证方法（`--no-checkout` 不建索引会伪装成「gitlink 未登记」→ L-015） | 规范性变更（跨仓地址迁移收尾）：**脚本零改动**、宿主调用行为不变（gitlink 未变）→ **不升版本**（宿主仍 pin `v1.3.0`） |
 | CR-010 | 2026-09-19 | 仓库位置迁移：`origin` 由 codeup 改为**公开** GitHub 仓（`git@github.com:xiyuyanhen/archive-pgy-uploader.git`，SSH 形式**绕开**全局 `insteadOf` 的 push 改写）；公开前完成泄密预检（25 个跟踪文件零命中）；新开 `OPEN-006`（3 个宿主 `.gitmodules` 仍指 codeup，形成双远端分叉，待决策） | 规范性变更：仓库位置变更，**脚本零改动**、宿主调用行为不变 → **不升版本**（宿主仍 pin `v1.3.0`） |
 | CR-009 | 2026-09-19 | 校准：实测「能否核实远端状态」的边界并收窄结论——**公开**远端可匿名 `ls-remote`（rc=0 + 真实 SHA），**私有**远端为 `HTTP 401` → rc=128（即网络通、纯缺凭证）；记录本机全局 `url.*.insteadOf` 会**同时改写 fetch 与 push**（无独立 `pushInsteadOf`）→ 换远端前须评估凭证流向；`OPEN-005` 处置细化为三步 | 校准修正：仅文档/记忆，**脚本零改动** → **不升版本**（宿主仍 pin `v1.3.0`） |
 | CR-008 | 2026-09-19 | 校准：订正「远端一个标签都没有」的错误结论（实为 `ls-remote` 退出码 128「查询失败」）；澄清「push 标签不产生本地引用，标签状态只能查远端」；新增 L-014（空结果 vs 查询失败的判据） | 校准修正：仅文档/记忆，**脚本零改动** → **不升版本**（宿主仍 pin `v1.3.0`） |
@@ -53,3 +54,4 @@
 | --- | --- | --- |
 | OPEN-003 | v1.1.0 | `jq` 硬依赖补登进 `README.md` 与 `skill/SKILL.md` 的前置条件；`sync-hosts.sh` 亦在启动时校验 jq |
 | OPEN-004 | v1.1.0 | README 文件树补全（`archive_upload.sh` / `link-skill.sh` / `skill/` / `sync-hosts.sh` / `.local/`） |
+| OPEN-006 | 无版本变更（CR-011） | 3 个宿主 `.gitmodules` 与 `submodule.<name>.url` 改指公开 GitHub 仓并 `git submodule sync`；全新克隆 + `submodule update --init` 端到端验证通过（详见 `STATUS.md` §7 / §9.9） |

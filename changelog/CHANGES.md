@@ -27,6 +27,48 @@
 
 ---
 
+## CR-011 — 收尾迁移：push 已核实、`OPEN-006` 整体迁移完成、验证方法订正（L-015）
+
+- **变更时间**：2026-09-20
+- **变更类型**：规范性变更（跨仓地址迁移收尾，**无版本变更**）
+- **关联版本**：无
+- **变更原因**：使用者完成 push 并选择「①整体迁移」以关闭 `OPEN-006`。本轮把 3 个宿主的子模块地址
+  一并迁到公开 GitHub 仓，并用全新克隆端到端证明迁移成立；期间发现**验证方法本身出过一次错**，沉淀 L-015。
+
+**变更前后差异**
+
+| 项 | 变更前 | 变更后 |
+|----|--------|--------|
+| 引擎仓 push 状态 | **无法自证**（私有远端 + 沙箱无凭证），只能依赖使用者回报 | **可自证**：匿名 `ls-remote` 核实 `master`=`98eef5e`、`v1.1.0`/`v1.2.0`/`v1.3.0` 三标签齐备、`v1.3.0^{}`=`dd06073` |
+| `origin/master` 引用 | codeup 遗留 `2dbc1a0`（不代表 GitHub） | `98eef5e`，与 HEAD 差异 `0 0` |
+| 3 个宿主 `.gitmodules` | 均指向 codeup | 均指向 `https://github.com/xiyuyanhen/archive-pgy-uploader.git`；`submodule.<name>.url` 与 `.git/modules/*/config` 一并 `submodule sync` |
+| 宿主 gitlink | `dd06073` | **未变**（`dd06073`）；各宿主仅 `.gitmodules` 一处改动 |
+| 新克隆宿主能否解析引擎 | 从 codeup 拉取（与引擎新提交所在处**分叉**） | 从 GitHub **匿名**拉取（已实测 `update --init` 成功检出 `dd06073`，退出码 0） |
+| `OPEN-006` | open | **已关闭** |
+| 验证方法 | 用 `--no-checkout` 克隆后直接 `ls-files`/`config -f` | 必须先 `git read-tree HEAD` 建索引（否则空索引会伪装成「gitlink 未登记」） |
+
+**影响范围**：3 个宿主各 1 处提交（**不入本仓**）：`xiyuScoreboard 0e69d28`、`xiyu_todo_list 7d2d3ba`、
+`xiyuWebBrowser 05ee675`；本仓文档：`STATUS.md`（§7 关闭 `OPEN-006` + `known_issues` 移除、§9.9）、
+`changelog/CHANGES.md`、`changelog/CHANGELOG.md`、`experience/LESSONS.md`（L-015）、
+`experience/execution-log.json`、`.workbuddy/memory/`。`.local/hosts.json` 的 `engineRemote` 同步（本机私有，无逻辑依赖）。
+**脚本零改动。**
+
+**兼容性说明**：宿主调用行为不变（gitlink 未变、路径未变），**不升版本、不打标签**（宿主仍 pin `v1.3.0`）。
+宿主侧原有克隆需 `git submodule sync` 才会更新其 `.git/config`（本机 3 个宿主已执行）。
+
+**验证方式**：
+
+```bash
+# 1) 公开仓可自证 push（无需凭证）
+git ls-remote https://github.com/xiyuyanhen/archive-pgy-uploader.git   # master + 三个 v* 标签
+# 2) 全新克隆宿主 → 子模块应从 GitHub 匿名解析（注意先建索引）
+git clone --no-checkout <host> probe && cd probe && git read-tree HEAD
+git checkout HEAD -- .gitmodules
+git submodule update --init -- <submodule-path>   # 期望: checked out 'dd06073…'，退出码 0
+```
+
+---
+
 ## CR-010 — 规范性变更：`origin` 由 codeup 替换为**公开** GitHub 仓（SSH），含公开前泄密预检
 
 - **变更时间**：2026-09-19
