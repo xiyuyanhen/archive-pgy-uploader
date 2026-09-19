@@ -7,7 +7,7 @@ project_version: "1.3.0"
 last_calibrated: "2026-09-19"
 calibration_state: "current"
 authority: "本文件是本项目现状的唯一事实来源；与 README / AGENTS.md 冲突时以本文件为准"
-repository: "https://codeup.aliyun.com/61c852431ccc3a1faae0a9fa/scripts/archive-pgy-uploader.git"
+repository: "https://github.com/xiyuyanhen/archive-pgy-uploader"
 project_type: "code"
 positioning: "通用 Xcode Archive → 蒲公英(Pgyer) 自动上传引擎（多项目以 submodule 共享，配置与密钥按项目分离）"
 maturity: "已在 3 个 iOS 项目实际使用且接入方式已统一为 submodule（xiyuScoreboard / xiyu_todo_list / xiyuWebBrowser）；治理基线自 v1.0.0 起"
@@ -43,6 +43,7 @@ known_issues:
   - {id: "OPEN-001", severity: "medium", status: "by-design", summary: "Xcode 不热加载外部手改的共享 .xcscheme：注入 Post-actions 后未完全重开 Xcode 则不生效，表现为「不上传、无日志」"}
   - {id: "OPEN-002", severity: "low", status: "by-design", summary: "--notes 仅在 CLI/手动入口生效；Xcode Post-actions 入口根本不接收该参数，更新说明恒取自 PGYUploadHistory.json [0].updateDes"}
   - {id: "OPEN-005", severity: "medium", status: "by-design", summary: "子模块接入要求引擎 commit 已 push origin；仅本地 commit 会导致他人/新克隆解析不到 gitlink。自 v1.2.0 起发布标签（vX.Y.Z）同理需 push，否则他人/新克隆看不到 release 同步目标"}
+  - {id: "OPEN-006", severity: "medium", status: "open", summary: "三个宿主 .gitmodules 仍指向 codeup，与引擎新 origin（公开 GitHub）分叉：新克隆宿主时引擎仍从 codeup 拉取，而引擎新提交只推往 GitHub。是否整体迁移需使用者决策（CR-010）"}
 ---
 
 # STATUS.md — 项目状态与交接基线
@@ -61,7 +62,7 @@ known_issues:
 | 最近校准 | 2026-09-19（v1.3.0：新增「半套接入」`unregistered-gitlink` 的检测与自动补登；同批修复 `--apply` 的 tab 折叠串列缺陷） |
 | 一句话定位 | 通用 Xcode Archive → 蒲公英(Pgyer) 自动上传引擎（多项目以 submodule 共享，配置与密钥按项目分离） |
 | 成熟度 | 已在 3 个 iOS 项目实际使用且接入方式已统一为 submodule（xiyuScoreboard / xiyu_todo_list / xiyuWebBrowser）；治理基线自 v1.0.0 起 |
-| 远端仓库 | https://codeup.aliyun.com/61c852431ccc3a1faae0a9fa/scripts/archive-pgy-uploader.git |
+| 远端仓库 | **公开** GitHub：https://github.com/xiyuyanhen/archive-pgy-uploader （SSH：`git@github.com:xiyuyanhen/archive-pgy-uploader.git`）｜历史（codeup，已不再作 origin）：https://codeup.aliyun.com/61c852431ccc3a1faae0a9fa/scripts/archive-pgy-uploader.git |
 
 > **版本号语义**：本项目在治理基线建立前**没有版本号体系**（无 git tag、脚本内无版本常量）。
 > `v1.0.0` 不表示"发布版本"，而是**建立治理基线时的现状快照**——即当时 HEAD 的可用能力集合。
@@ -97,7 +98,8 @@ known_issues:
 - **不携带任何项目密钥或路径**：本仓库是共享引擎，禁止出现真实 `PGY_USER_KEY` / `PGY_API_KEY`、项目绝对路径、Bundle ID 真值。
 - **不管理签名与证书**：不做证书申请、profile 生成、team 配置；依赖项目自身签名能力（`xcodebuild -exportArchive` 的 `ExportOptions.plist` 由引擎生成）。
 - **不 push、不替使用者决定远端**：引擎本体不 push；`sync-hosts.sh` 仅在**宿主侧做本地 commit**（更新 gitlink），
-  push 一律由人决定。子模块 gitlink 的 push（见 `OPEN-005`）由使用者本地完成（本机 sandbox 无 codeup 凭证）。
+  push 一律由人决定。子模块 gitlink 的 push（见 `OPEN-005`）由使用者本地完成（本机 sandbox 内推送不可行：
+  origin 现为 GitHub SSH，`~/.ssh/id_ed25519` 带口令且 `ssh-agent` 无已加载身份 → 无法非交互认证）。
 - **不扩展到其他分发平台**：仅蒲公英（`apiv2/app/upload`）；不做 TestFlight / Firebase / 自建分发。
 - **不覆盖非 iOS 平台**：假定产物是 `.xcarchive` / `.ipa`。
 - **不修改宿主 Xcode 工程**：不写 `project.pbxproj` / `.xcscheme`（Post-actions 由使用者在 Xcode 内手动添加或按文档注入）。
@@ -343,7 +345,8 @@ bash sync-hosts.sh --install-hook --auto    # 可选：发布时自动跟随（�
 | --- | --- | --- | --- | --- | --- | --- |
 | OPEN-001 | medium | Xcode 不热加载外部手改的共享 `.xcscheme` | 用文本/脚本注入 Post-actions，且未完全退出重开 Xcode | Archive 后不上传、`$TMPDIR` 无 `pgy_upload_*.log`（脚本根本没启动） | ① 优先走 CLI 入口 `archive_upload.sh`（不依赖 scheme 缓存）；② 在 Xcode `Edit Scheme → Archive → +` 手动添加；③ 接入后**完全退出 Xcode 重开** | by-design |
 | OPEN-002 | low | `--notes` 仅在 CLI/手动入口生效 | 走 Xcode Post-actions 入口时该参数未传入 | 更新说明恒取 `PGYUploadHistory.json [0].updateDes`，改 `--notes` 看似无效 | 改 JSON 的 `updateDes`，或改走 `archive_upload.sh` | by-design |
-| OPEN-005 | medium | 子模块接入要求引擎 commit 已 push origin | 仅本地 commit 未 push 即在他处/新克隆使用 | 新克隆解析不到 gitlink commit，子模块拉取失败（v1.2.0 起**发布标签同理需 push**，否则看不到 release 目标） | 引擎侧改动先 push 再由宿主更新 gitlink；本机 sandbox 无 codeup 凭证，需人工 push | by-design |
+| OPEN-005 | medium | 子模块接入要求引擎 commit 已 push origin | 仅本地 commit 未 push 即在他处/新克隆使用 | 新克隆解析不到 gitlink commit，子模块拉取失败（v1.2.0 起**发布标签同理需 push**，否则看不到 release 目标） | 引擎侧改动先 push 再由宿主更新 gitlink；本机 sandbox 无法完成推送（无可用凭证/密钥身份），需人工 push | by-design |
+| OPEN-006 | medium | 三个宿主 `.gitmodules` 仍指向 codeup，与引擎新 `origin`（公开 GitHub）分叉 | `origin` 迁至 GitHub 后，宿主的子模块 url 未同步改写 | 新克隆宿主时引擎仍从 codeup 拉取；引擎新提交只推往 GitHub → 两条远端分叉，新克隆可能拿不到最新引擎 | 二择一：①**整体迁移**——用同一脚本/手工改写 3 个宿主 `.gitmodules` 的 url 并各自提交；②**保持现状**——把 `origin` 指回 codeup 或设为双远端 | open |
 
 **已关闭条目**（处置过程见 `changelog/CHANGES.md`，本表不再保留）：
 
@@ -506,3 +509,15 @@ bash sync-hosts.sh --install-hook --auto    # 可选：发布时自动跟随（�
 1. **push 标签后无法在本机自证**——`git push` 只更新远程跟踪引用（分支可反推），**push 标签不产生任何本地引用**，故「标签推没推」只能查远端。`sync-hosts.sh` 也不代查（无 `ls-remote`），即**工具永远不会替你确认 release 标签是否已 push**。
 2. **远端换成公开 GitHub 仓可解，换成私有仓不可解**——沙箱对**公开**仓可匿名 `ls-remote` 自证；**私有**仓（含私有 GitHub 仓）仍为 `HTTP 401 → rc 128`，因沙箱无任何 GitHub 凭证通道（`gh` 未装、无 token 变量、无 `hosts.yml`）。
 3. **换远端地址前先处理全局 `insteadOf` 重写**——本机全局规则会把 `https://github.com/` 改写为 `https://ghfast.top/https://github.com/`，且该重写**同时作用于 push**。这意味着改远端后**推送凭证会经第三方加速镜像**；同时未 `git fetch` 前 `origin/master` 是旧远端的陈旧值，会让 `--target origin` 给出过期目标。切换远端后请按 §9.7 第 6 行先 `git fetch`、并用 `git remote get-url --push origin` 确认实际生效 URL。
+
+### 9.8 2026-09-19 变更（CR-010：`origin` 由 codeup 替换为公开 GitHub 仓）
+
+| # | 事项 | 判定 | 处理方式 |
+| --- | --- | --- | --- |
+| 1 | `origin` 替换 | 已执行 `git remote set-url origin git@github.com:xiyuyanhen/archive-pgy-uploader.git`；`git remote -v` 的 fetch/push 均为该 SSH 地址 | 本节留痕；§5 表格与 frontmatter `repository` 同步更新 |
+| 2 | **SSH 形式天然绕开全局 `insteadOf` 重写**（CR-009 曾警告的点） | **已实测**：`git remote get-url --push origin` 原样返回 `git@github.com:...`，未被改写。原因：全局规则是 `url.https://ghfast.top/https://github.com/.insteadof https://github.com/`，只匹配 `https://github.com/` 前缀，**不匹配 `git@github.com:`** → 推送凭证**不会**经 ghfast.top 镜像 | 选 SSH 而非 HTTPS 是本轮的实际收益；日后若改回 HTTPS 需重新评估该重写 |
+| 3 | 沙箱内能否推送 | **不能**。`~/.ssh/id_ed25519`（注释 `xiyuyanhen@163.com`）**带口令**（`ssh-keygen -y -P ""` 失败），且 `ssh-add -l` → `The agent has no identities`；`ssh -T git@github.com` → `Permission denied (publickey)`。网络与 22 端口**是通的**（已收到服务端拒绝，非超时） | push 仍由使用者在其终端完成（与 §3 用户主导 push 一致）；`OPEN-005` 的「需人工 push」结论不变，仅理由从「无 codeup 凭证」改为「无可用非交互密钥身份」 |
+| 4 | 目标仓当前状态 | **存在且为空**：匿名 `git ls-remote https://github.com/xiyuyanhen/archive-pgy-uploader.git` → `rc=0` 且输出为空。**配对照**：查询不存在的仓 → `rc=128` + `fatal: could not read Username`。故 rc=0+空 是「仓在、无任何 ref」，非「查不到」 | 使用者推 `master`（及标签）后即可正常同步 |
+| 5 | 公开前的泄密预检（因目标仓为 **Public**） | **通过**：对全部 25 个跟踪文件扫描 `PGY_API_KEY=`/`PGY_USER_KEY=` 实值、`sk-`、`ghp_`、JWT(`eyJ`)、`-----BEGIN … PRIVATE KEY`、token 赋值、邮箱、手机号、内网 IP、隧道域名 → **零命中**；`.gitignore` 已排除 `pgy_config.sh` / `.local/` / `.env*`。**但**：`.workbuddy/memory/*.md` 与 `execution-log.json` 被跟踪，其中含**内部宿主项目名**（xiyuScoreboard / xiyu_todo_list / xiyuWebBrowser）、本机绝对路径、codeup 命名空间 URL | 已向使用者提示该暴露面；是否把记忆移出版本控制由其决定（本轮**不擅自改动**） |
+| 6 | 换远端后的陈旧远程跟踪引用 | `refs/remotes/origin/master` 仍为换 URL 前从 codeup 取到的 `2dbc1a0`（线上 GitHub 实际为空）→ 此刻它**不代表 GitHub 状态**（正是 §9.7 第 6 行预警的情形）。本轮**不删该引用**（非破坏性原则，且它是 codeup 最后状态的唯一本地记录） | 使用者 push 后执行 `git fetch origin && git remote set-head origin -a`，该引用即被修正为 GitHub 真实状态 |
+| 7 | 三个宿主的子模块地址**尚未**跟随 | 各宿主 `.gitmodules` 内仍写 codeup 地址（本轮只改引擎自身 `origin`，未动宿主）。含义：**新克隆宿主时引擎仍从 codeup 拉取**，而引擎新提交推往 GitHub → 两边分叉 | **遗留决策**（未擅自改）：若确定迁移到 GitHub，需同步改写 3 个宿主 `.gitmodules` 的 url 并各自提交。列入 `OPEN-006` |

@@ -19,12 +19,15 @@
 2. 接入 Post-actions 时同步在 SKILL.md/文档标注"需重开 Xcode"。
 3. `pgy_config.sh` 密钥就位、gitignored；`TARGET_BUNDLE_ID` 与 pbxproj 一致。
 4. 接入后用 CLI 入口实跑一次验证整条链路（不依赖 Xcode GUI）。
-5. 引擎仓 commit 必须先 push origin，否则他人/新克隆解析不到子模块 commit（sandbox 无 codeup 凭证，需用户本地 push）。
+5. 引擎仓 commit 必须先 push origin，否则他人/新克隆解析不到子模块 commit。
+   **`origin` 已于 2026-09-19 迁至公开 GitHub 仓**（`git@github.com:xiyuyanhen/archive-pgy-uploader.git`，SSH）→
+   沙箱内**仍不能 push**，但理由从「无 codeup 凭证」变为「`~/.ssh/id_ed25519` 带口令且 `ssh-agent` 无身份」，需用户本地 push（`OPEN-005`）。
 6. **原生 XcodeGen 工程（无 Runner scheme / 无共享 scheme，如 xiyuWebBrowser）接入范式**：
    - Xcode 接线优先用 **Build Phase `runOnlyWhenInstalling: true`** 调 `pgy_upload.sh`（比 Post-actions 稳，不依赖选哪个 scheme；`$ARCHIVE_PATH` 为空时引擎多策略查找兜底）。改 `project.yml` 后需 `xcodegen generate`。
    - 因引擎默认 `--scheme Runner`/`Runner.xcworkspace`，须加**项目专属包装脚本**（如 `archive_and_upload.sh`）预置 `--workspace *.xcodeproj --scheme <本scheme> --config pgy_config.sh`，让 AI/CLI 一条命令跑通。
    - ~~sandbox 无法推 codeup 远程时，用**复制引擎文件**代替 submodule~~ → **已废弃**（CR-003）：复制会失去版本锚点并漂移（WebBrowser 曾因此连引擎版本都说不清）。
-     正确做法：用 `git -c protocol.file.allow=always submodule add <本地引擎路径> <路径>` 从本地路径克隆，**随后把 `.gitmodules` 与 `.git/modules/.../config` 的 url 改回 codeup 远端**（无需网络凭证即可完成 submodule 接入）。
+     正确做法：用 `git -c protocol.file.allow=always submodule add <本地引擎路径> <路径>` 从本地路径克隆，**随后把 `.gitmodules` 与 `.git/modules/.../config` 的 url 改回远端地址**（无需网络凭证即可完成 submodule 接入）。
+    ⚠️ 3 个宿主的 `.gitmodules` 目前仍写 **codeup** 地址，与引擎新 GitHub `origin` **分叉**（新克隆宿主从 codeup 拉引擎，而引擎新提交推 GitHub）→ 见 `OPEN-006`，待决策。
    - `xcodegen generate` **不要盲目执行**：本机实测会清空 `DEVELOPMENT_TEAM` 并改写 `LD_RUNPATH_SEARCH_PATHS`（pbxproj 与 project.yml 早已不同步，见 L-008）→ 改为就地替换 pbxproj 中那一段 `shellScript`。
 7. **子模块登记必须「两件齐全」**：`.gitmodules` **和** gitlink（索引模式 `160000`）都在 HEAD。
    只提交 `.gitmodules` 会得到 `unregistered-gitlink`——本地看不出来，新克隆**静默**缺少该子模块（L-013）。
@@ -67,7 +70,8 @@
   - 意图：**纯文档 / 记忆提交不再让三个宿主重新 pin**（v1.1.0 时代每个提交都会，甚至为规避而不敢提交记忆）。判据见 `STATUS.md` §8.4。
   - `v1.0.0` **无标签**（按 §1 是治理基线快照、非发布版本）；`v1.1.0` 是事后补打的第一个发布标签。
 - **钩子只能当兜底**：git 无 `post-tag`，常规顺序「先 commit 后 tag」下 `post-commit` 永不触发 → `--auto` 改为「仅 HEAD 正好是发布标签时才 apply」。别指望钩子完成发布同步。
-- **push 一律由用户主导**（本机沙箱无 codeup 凭证，见 `OPEN-005`）。**标签也必须 push**，否则他人 / 新克隆看不到 release 目标。
+- **push 一律由用户主导**（本机沙箱无可用非交互密钥身份，见 `OPEN-005`）。**标签也必须 push**，否则他人 / 新克隆看不到 release 目标。
+  - 换成**公开** GitHub 仓后的好处：标签/分支状态**事后可由沙箱匿名核实**（`git ls-remote https://github.com/xiyuyanhen/archive-pgy-uploader` → `rc=0`），不再只能依赖用户回报。
 - 评估结论（勿反复推翻）：**软链共享只适合「暴露层」**（如 `link-skill.sh` 注册技能），不适合承载引擎共享——会让所有宿主共享同一工作区，失去版本锚点与并行版本能力，且 `rm -rf <link>/` 会穿透删中央实体。
 
 ## shell 脚本约定（本仓所有 `*.sh` 必须遵守）

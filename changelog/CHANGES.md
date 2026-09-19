@@ -27,6 +27,46 @@
 
 ---
 
+## CR-010 — 规范性变更：`origin` 由 codeup 替换为**公开** GitHub 仓（SSH），含公开前泄密预检
+
+- **变更时间**：2026-09-19
+- **变更类型**：规范性变更（仓库位置迁移，**无版本变更**）
+- **关联版本**：无
+- **变更原因**：使用者要求把远端替换为公开 GitHub 仓 `git@github.com:xiyuyanhen/archive-pgy-uploader.git`。
+  这是 CR-009 讨论「换成 GitHub 能否核实标签状态」的直接落地；同时因目标仓为 **Public**，
+  必须先做泄密预检才能改远端。关联 `OPEN-005`（push 归属）、新开 `OPEN-006`（宿主子模块地址未跟随）。
+
+**变更前后差异**
+
+| 项 | 变更前 | 变更后 |
+|----|--------|--------|
+| `origin` | `https://codeup.aliyun.com/61c852431ccc3a1faae0a9fa/scripts/archive-pgy-uploader.git` | `git@github.com:xiyuyanhen/archive-pgy-uploader.git`（**SSH**，公开仓） |
+| 推送凭证流向 | 走 https → 会被全局 `insteadOf` 改写 | **SSH 不匹配该规则**（规则仅匹配 `https://github.com/` 前缀）→ 实测 `get-url --push` 原样返回，**不经 ghfast.top 镜像** |
+| 沙箱内可核实性 | 私有远端 → 完全不可核实 | 公开仓 → **可匿名 HTTPS 核实**（`ls-remote` rc=0）；推送仍不可（密钥带口令 + agent 无身份） |
+| 沙箱内能否 push | 不能（无 codeup 凭证） | **仍不能**，但理由变为「无可用非交互密钥身份」 |
+| 公开暴露面 | 无（私有仓） | 25 个跟踪文件全部公开；已预检无密钥/凭证，但 `.workbuddy/memory/*.md` 暴露内部项目名与路径 |
+| 远端地址引用 | STATUS §5 / frontmatter 记 codeup | 改记 GitHub；codeup 作为「历史」保留在文档中（历史记录/CHANGES 正文不改写） |
+
+**影响范围**：仓库位置与文档表述——`STATUS.md`（frontmatter `repository`、§5 远端仓库行、§3 push 归属理由、
+§7 `OPEN-006` 新增、§9.8）；`changelog/CHANGES.md`、`changelog/CHANGELOG.md`、`experience/execution-log.json`、
+`.workbuddy/memory/`。**脚本零改动**（`sync-hosts.sh` 只按 `origin` 符号引用，不硬编码 URL）。
+
+**兼容性说明**：不改变宿主调用行为，**不升版本、不打标签**（宿主仍 pin `v1.3.0`）。
+⚠️ **非破坏性但需使用者决策**：3 个宿主 `.gitmodules` 仍指向 codeup，引擎新提交若只推 GitHub 会形成**双远端分叉**（见 `OPEN-006`）。
+
+**验证方式**：
+
+```bash
+git remote get-url origin        # → git@github.com:xiyuyanhen/archive-pgy-uploader.git
+git remote get-url --push origin # → 同上（确认未被全局 insteadOf 改写）
+# 公开仓可匿名核实（无需凭证）；对照：不存在的仓为 rc=128
+git ls-remote https://github.com/xiyuyanhen/archive-pgy-uploader.git; echo "rc=$?"
+# 公开前泄密预检：对跟踪文件扫描密钥形态，应零命中
+git ls-files -z | xargs -0 grep -nEI '(PGY_API_KEY|PGY_USER_KEY)[[:space:]]*=[[:space:]]*["'"'"']?[A-Za-z0-9]{8,}|sk-[A-Za-z0-9]{10,}|ghp_[A-Za-z0-9]{20,}|eyJ[A-Za-z0-9_-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY'
+```
+
+---
+
 ## CR-009 — 校准：远端可核实性的实测边界（公开可查 / 私有 401）与本机全局 URL 重写的影响
 
 - **变更时间**：2026-09-19
