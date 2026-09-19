@@ -35,3 +35,13 @@
 - 追加式文档插入新条目时，锚点取**新条目自身正文**并在其前插入（等价「A→A+B」），**绝不用下一条目标题当锚点**，否则会静默吞掉该标题。
 - `STATUS.md` 关键约束：`jq` 是硬依赖（缺失 exit 1）；Post-actions 入口只收 `--config/--archive`，更新说明恒取 JSON `updateDes`；`--notes` 只在 CLI 入口生效。
 - 尚未补的文档债：`OPEN-003`（jq 未登记进 README/SKILL.md 前置条件）、`OPEN-004`（README 文件树缺 `archive_upload.sh`/`link-skill.sh`/`skill/`）。
+  → **已在 v1.1.0 关闭**（README / SKILL.md 补 jq；README 文件树补全）。
+
+## 多项目共享方式与同步机制（2026-09-19 起，v1.1.0）
+
+- **共享机制统一为 submodule**（不再有文件复制）。三个宿主：`xiyuScoreboard` / `xiyu_todo_list`（路径 `ios/Scripts/archive-pgy-uploader`）、`xiyuWebBrowser`（路径 `pgy-archive-uploader`，宿主根）。
+- **工程不变量：引擎目录内不得出现密钥**。凭证与控制文件必须放**引擎目录之外**的兄弟目录（命名约定 `*-archive-pgy-config/`）。通用入口默认按 `<宿主>/ios/Scripts/archive-pgy-config/pgy_config.sh` 探测；非此结构（如 XcodeGen 工程）必须显式传 `--config`。
+- **项目专属包装脚本不得放在引擎目录内**（会被 submodule 覆盖）：放宿主根，内部用 `ENGINE_DIR` / `<PROJ>_CONFIG` 变量转发。
+- **本机多宿主跟随同步**：`bash sync-hosts.sh`（默认 `--check` 只读体检，退出码 0=一致 / 2=有落后或需人工介入 / 1=出错）→ `--apply` 更新各宿主 gitlink 并**只在宿主侧本地 commit**（不 push）；名单 `.local/hosts.json`（gitignored，本机私有）。可选 `--install-hook --auto` 在引擎提交后自动跟随。
+- 同步目标默认取**引擎本机 HEAD**（未 push 也能跟随），`--from-origin` 才跟远端。**push 一律由用户主导**（本机沙箱无 codeup 凭证，见 `OPEN-005`）。
+- 评估结论（勿反复推翻）：**软链共享只适合「暴露层」**（如 `link-skill.sh` 注册技能），不适合承载引擎共享——会让所有宿主共享同一工作区，失去版本锚点与并行版本能力，且 `rm -rf <link>/` 会穿透删中央实体。
