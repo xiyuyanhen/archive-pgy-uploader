@@ -17,3 +17,6 @@ pgy_config.sh
 .idea/
 .vscode/*
 !.vscode/extensions.json
+
+# 设备本地层（本机专属状态，不入库、不进 CR、不参与跨设备校验，ISS-014）
+*.local.md

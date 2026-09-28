@@ -27,6 +27,27 @@
 
 ---
 
+## CR-012 — 治理基线对齐脚手架 v1.12.0：事实分层 + 校准记录外迁 + A/B 分级指纹
+
+- **变更时间**：2026-09-20
+- **变更类型**：规范性变更（治理文档结构与脚手架契约对齐；A 类·轻量：未触碰代码 / 契约 / 依赖）
+- **关联版本**：无版本变更
+- **变更原因**：脚手架 `xiyu-project-governance` 自身已迭代到 v1.12.0（governance_schema 1.0），本项目的治理文档结构相对滞后，缺少「多设备并行」所需的事实分层机制（`STATUS.local.md`）与校准记录单点真相（`calibrations.md`）。本次按脚手架新契约对齐，不影响宿主调用行为。
+
+**影响范围**：`STATUS.md`（frontmatter 加 `governance_generator` / `governance_schema`；§8.1 职责表加 `changelog/calibrations.md` 行；§8.2 拆为「变更分级与流程」含 A/B 分级与 ⑦ RE-VERIFY；§8.3 增加 A 类轻量条目模板；§8.5 检查清单加 `verify_consistency.py` 复核项；§9 改为指向 `changelog/calibrations.md` 的指针）、`changelog/calibrations.md`（新建，迁入原 §9.1–9.9）、`AGENTS.md`（引用 `calibrations.md` 与 `STATUS.local.md`、目录导航补两项）、`STATUS.local.md`（新建，设备本地层）、`.gitignore`（追加 `*.local.md`）。**脚本零改动**。
+
+**兼容性说明**：向后兼容（纯治理文档结构性调整，无运行行为变化）→ **不升版本、不打标签**（宿主仍 pin `v1.3.0`）。
+
+**验证方式**：
+
+```bash
+python3 <xiyu-project-governance 脚手架>/scripts/verify_consistency.py --dir .   # 期望：无 FAIL（脚手架位于 ~/.workbuddy/skills/ 下，按实际路径替换）
+git check-ignore -v STATUS.local.md     # 命中 *.local.md
+grep -n "calibrations.md" STATUS.md AGENTS.md   # 两处均已引用
+```
+
+---
+
 ## CR-011 — 收尾迁移：push 已核实、`OPEN-006` 整体迁移完成、验证方法订正（L-015）
 
 - **变更时间**：2026-09-20

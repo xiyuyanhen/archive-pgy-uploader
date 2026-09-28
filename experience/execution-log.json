@@ -32,9 +32,24 @@
           ".gitignore"
         ]
       },
-      "changes": ["CR-001", "CR-002"],
-      "open_issues_opened": ["OPEN-001", "OPEN-002", "OPEN-003", "OPEN-004", "OPEN-005"],
-      "lessons_added": ["L-001", "L-002", "L-003", "L-004", "L-005"]
+      "changes": [
+        "CR-001",
+        "CR-002"
+      ],
+      "open_issues_opened": [
+        "OPEN-001",
+        "OPEN-002",
+        "OPEN-003",
+        "OPEN-004",
+        "OPEN-005"
+      ],
+      "lessons_added": [
+        "L-001",
+        "L-002",
+        "L-003",
+        "L-004",
+        "L-005"
+      ]
     },
     {
       "run_id": "run-20260919-lessons-backfill",
@@ -76,7 +91,9 @@
         "L-002 的排查要点：「没有日志」与「有日志但停在某一步」是两类不同故障，前者=脚本未启动，后者=脚本内提前退出。"
       ],
       "artifacts": {
-        "files": ["experience/LESSONS.md"]
+        "files": [
+          "experience/LESSONS.md"
+        ]
       },
       "changes": [],
       "open_issues_opened": []
@@ -123,10 +140,20 @@
           ]
         }
       },
-      "changes": ["CR-003", "CR-004"],
+      "changes": [
+        "CR-003",
+        "CR-004"
+      ],
       "open_issues_opened": [],
-      "open_issues_closed": ["OPEN-003", "OPEN-004"],
-      "lessons_added": ["L-006", "L-007", "L-008"]
+      "open_issues_closed": [
+        "OPEN-003",
+        "OPEN-004"
+      ],
+      "lessons_added": [
+        "L-006",
+        "L-007",
+        "L-008"
+      ]
     },
     {
       "run_id": "run-20260919-release-tag-sync-target",
@@ -185,9 +212,16 @@
           ]
         }
       },
-      "changes": ["CR-005", "CR-006"],
+      "changes": [
+        "CR-005",
+        "CR-006"
+      ],
       "open_issues_opened": [],
-      "lessons_added": ["L-009", "L-010", "L-011"]
+      "lessons_added": [
+        "L-009",
+        "L-010",
+        "L-011"
+      ]
     },
     {
       "run_id": "run-20260919-unregistered-gitlink-apply",
@@ -236,9 +270,14 @@
           ]
         }
       },
-      "changes": ["CR-007"],
+      "changes": [
+        "CR-007"
+      ],
       "open_issues_opened": [],
-      "lessons_added": ["L-012", "L-013"]
+      "lessons_added": [
+        "L-012",
+        "L-013"
+      ]
     },
     {
       "run_id": "run-20260919-remote-tag-verification-calibration",
@@ -280,9 +319,13 @@
           ]
         }
       },
-      "changes": ["CR-008"],
+      "changes": [
+        "CR-008"
+      ],
       "open_issues_opened": [],
-      "lessons_added": ["L-014"]
+      "lessons_added": [
+        "L-014"
+      ]
     },
     {
       "run_id": "run-20260919-remote-queryability-calibration",
@@ -319,7 +362,9 @@
           ]
         }
       },
-      "changes": ["CR-009"],
+      "changes": [
+        "CR-009"
+      ],
       "open_issues_opened": [],
       "lessons_added": []
     },
@@ -359,8 +404,12 @@
           ]
         }
       },
-      "changes": ["CR-010"],
-      "open_issues_opened": ["OPEN-006"],
+      "changes": [
+        "CR-010"
+      ],
+      "open_issues_opened": [
+        "OPEN-006"
+      ],
       "lessons_added": []
     },
     {
@@ -380,9 +429,21 @@
       ],
       "evidence": {
         "commits": [
-          {"hash": "0e69d28", "subject": "xiyuScoreboard: chore(submodule): 引擎子模块地址由 codeup 迁移至 GitHub 公开仓", "supports": "宿主侧本地提交（未 push）"},
-          {"hash": "7d2d3ba", "subject": "xiyu_todo_list: chore(submodule): 引擎子模块地址由 codeup 迁移至 GitHub 公开仓", "supports": "宿主侧本地提交（未 push）"},
-          {"hash": "05ee675", "subject": "xiyuWebBrowser: chore(submodule): 引擎子模块地址由 codeup 迁移至 GitHub 公开仓", "supports": "宿主侧本地提交（未 push）"}
+          {
+            "hash": "0e69d28",
+            "subject": "xiyuScoreboard: chore(submodule): 引擎子模块地址由 codeup 迁移至 GitHub 公开仓",
+            "supports": "宿主侧本地提交（未 push）"
+          },
+          {
+            "hash": "7d2d3ba",
+            "subject": "xiyu_todo_list: chore(submodule): 引擎子模块地址由 codeup 迁移至 GitHub 公开仓",
+            "supports": "宿主侧本地提交（未 push）"
+          },
+          {
+            "hash": "05ee675",
+            "subject": "xiyuWebBrowser: chore(submodule): 引擎子模块地址由 codeup 迁移至 GitHub 公开仓",
+            "supports": "宿主侧本地提交（未 push）"
+          }
         ]
       },
       "artifacts": {
@@ -403,10 +464,51 @@
           ]
         }
       },
-      "changes": ["CR-011"],
+      "changes": [
+        "CR-011"
+      ],
       "open_issues_opened": [],
-      "open_issues_closed": ["OPEN-006"],
-      "lessons_added": ["L-015"]
+      "open_issues_closed": [
+        "OPEN-006"
+      ],
+      "lessons_added": [
+        "L-015"
+      ]
+    },
+    {
+      "run_id": "run-20260920-governance-align-v1.12.0",
+      "date": "2026-09-20",
+      "project_version": "1.3.0",
+      "task": "治理基线对齐脚手架 v1.12.0：事实分层 + 校准记录外迁 + A/B 分级指纹（CR-012）",
+      "outcome": "success",
+      "summary": "按脚手架 v1.12.0 契约对齐本项目治理文档结构，以兼容多设备并行运行与迭代。新增设备本地层 STATUS.local.md（ISS-014 事实分层，gitignored）；把原 STATUS.md §9.1–9.9 校准记录迁出到 changelog/calibrations.md（单点真相，§9 改指针）；STATUS.md frontmatter 加 governance_generator/governance_schema 指纹；§8 引入 A/B 变更分级、⑦ RE-VERIFY（verify_consistency.py）与 A 类轻量条目模板；AGENTS.md 同步引用；.gitignore 补 *.local.md。脚本零改动，按项目 §8.4 规则不升版本、不打标签（宿主仍 pin v1.3.0）。",
+      "findings": [
+        "事实分层（ISS-014）是多设备并行的关键缺口：此前 STATUS.md 可能混入本机实测版本/绝对路径，换设备会被各 Agent 反复「修正」→ 新建 STATUS.local.md 承载设备专属状态，且不入库、不进 CR、不参与跨设备校验。",
+        "校准记录从 STATUS.md 内联迁出到 changelog/calibrations.md，避免「实现真相主文档」随校准事件无界增长而变重，且违反本体系自身的「单点真相 + 指针」原则。",
+        "governance_generator / governance_schema 指纹登记在 frontmatter，用于区分「项目自身漂移」与「脚手架契约升级」——verify_consistency.py 只 WARN 不 FAIL。",
+        "A/B 变更分级：A 类（规范性/校准且不碰代码）省去版本三处 + 版本档案 + 索引的机械动作，但 ③ CALIBRATE、⑦ RE-VERIFY、凭证预检三类任何情况不可跳过。",
+        "本项目本次为 A 类轻量变更：脚本/契约/依赖零改动，按项目 §8.4 规则保持 v1.3.0、不打标签。"
+      ],
+      "artifacts": {
+        "files": [
+          "STATUS.md",
+          "AGENTS.md",
+          "changelog/calibrations.md",
+          "STATUS.local.md",
+          ".gitignore",
+          "changelog/CHANGES.md",
+          "changelog/CHANGELOG.md",
+          "experience/LESSONS.md",
+          "experience/execution-log.json"
+        ]
+      },
+      "changes": [
+        "CR-012"
+      ],
+      "open_issues_opened": [],
+      "lessons_added": [
+        "L-016"
+      ]
     }
   ]
 }

@@ -32,8 +32,8 @@
 | 步骤 | 动作 |
 | --- | --- |
 | ① READ | 读 `STATUS.md` + `experience/LESSONS.md`，确认现有实现与已知问题 |
-| ② ASSESS | 判定变更类型：功能变更 / 规范性变更 / 校准修正 |
-| ③ CALIBRATE | 若 `STATUS.md` 与实现不一致 → **先校准**并在 §9 留痕，再继续 |
+| ② ASSESS | 判定变更类型：功能变更 / 规范性变更 / 校准修正，**并按 `STATUS.md` §8.2 分 A/B 级** |
+| ③ CALIBRATE | 若 `STATUS.md` 与实现不一致 → **先校准**并在 `changelog/calibrations.md` 留痕，再继续 |
 | ④ IMPLEMENT | 功能变更先验证通过，再并入主干 |
 | ⑤ UPDATE | 同步 `STATUS.md`（frontmatter + 受影响章节）**并**在 `changelog/CHANGES.md` 顶部追加 `CR-NNN` 条目（含：变更时间、原因、前后差异、影响范围、兼容性说明、验证方式） |
 | ⑥ VERSION | 影响运行行为 → 升版本 + 新建 `changelog/vX.Y.Z.md` + 更新 `changelog/CHANGELOG.md` 索引 |
@@ -59,6 +59,8 @@
 | `changelog/CHANGES.md` | 变更流水 `CR-NNN`（追加式） |
 | `changelog/CHANGELOG.md` | 版本索引 |
 | `changelog/vX.Y.Z.md` | 版本档案 |
+| `changelog/calibrations.md` | 校准记录（STATUS §9 迁出，单点真相） |
+| `STATUS.local.md` | 本机设备层（gitignored，不入库、不进 CR） |
 | `experience/INDEX.md` | 经验库使用说明与条目状态定义 |
 | `experience/LESSONS.md` | 结构化经验 `L-NNN` |
 | `experience/execution-log.json` | 机器可读执行日志（`run_id`） |

@@ -40,6 +40,7 @@
 
 | CR | 日期 | 摘要 | 原因 |
 | --- | --- | --- | --- |
+| CR-012 | 2026-09-20 | 治理基线对齐脚手架 v1.12.0：事实分层（`STATUS.local.md` 设备本地层，多设备并行关键）+ 校准记录外迁（`changelog/calibrations.md` 单点真相，`STATUS.md` §9 改指针）+ A/B 变更分级、`governance_generator`/`governance_schema` 指纹、⑦ RE-VERIFY、A 类轻量条目模板 | 规范性变更（治理文档结构对齐脚手架契约）：**脚本零改动**、宿主调用行为不变（gitlink 未变）→ **不升版本**（宿主仍 pin `v1.3.0`） |
 | CR-011 | 2026-09-20 | 收尾迁移：公开仓使 push **首次可自证**（`master`=`98eef5e`、三标签齐备、`v1.3.0^{}`=`dd06073`）；`OPEN-006` 整体迁移完成——3 个宿主 `.gitmodules` 改指 GitHub（`submodule sync` 同步内部 config，gitlink 未变），宿主侧提交 `0e69d28`/`7d2d3ba`/`05ee675`，并以**全新克隆 + `submodule update --init`** 端到端证明可匿名解析；订正验证方法（`--no-checkout` 不建索引会伪装成「gitlink 未登记」→ L-015） | 规范性变更（跨仓地址迁移收尾）：**脚本零改动**、宿主调用行为不变（gitlink 未变）→ **不升版本**（宿主仍 pin `v1.3.0`） |
 | CR-010 | 2026-09-19 | 仓库位置迁移：`origin` 由 codeup 改为**公开** GitHub 仓（`git@github.com:xiyuyanhen/archive-pgy-uploader.git`，SSH 形式**绕开**全局 `insteadOf` 的 push 改写）；公开前完成泄密预检（25 个跟踪文件零命中）；新开 `OPEN-006`（3 个宿主 `.gitmodules` 仍指 codeup，形成双远端分叉，待决策） | 规范性变更：仓库位置变更，**脚本零改动**、宿主调用行为不变 → **不升版本**（宿主仍 pin `v1.3.0`） |
 | CR-009 | 2026-09-19 | 校准：实测「能否核实远端状态」的边界并收窄结论——**公开**远端可匿名 `ls-remote`（rc=0 + 真实 SHA），**私有**远端为 `HTTP 401` → rc=128（即网络通、纯缺凭证）；记录本机全局 `url.*.insteadOf` 会**同时改写 fetch 与 push**（无独立 `pushInsteadOf`）→ 换远端前须评估凭证流向；`OPEN-005` 处置细化为三步 | 校准修正：仅文档/记忆，**脚本零改动** → **不升版本**（宿主仍 pin `v1.3.0`） |
