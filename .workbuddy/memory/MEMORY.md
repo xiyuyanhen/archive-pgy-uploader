@@ -1,127 +1,61 @@
 # archive-pgy-uploader 长期记忆（项目级）
 
-## Xcode 共享 scheme 外部改动的坑（重要）
-- 用文本/脚本在 `ios/Runner.xcodeproj/xcshareddata/xcschemes/*.xcscheme` 外部注入 ArchiveAction PostActions，Xcode **不会热加载**，必须完全退出 Xcode 重开项目才生效。用户测试时仍用旧内存方案 → Post-actions 不跑、无日志、不上传。
-- **规避（推荐）**：日常/自动化/AI 触发一律走 CLI 入口 `ios/Scripts/archive_upload.sh --target "测试版本"`（自己 xcodebuild archive + 上传，零 GUI 依赖，不踩 scheme 缓存坑）。
-- **若坚持 Xcode GUI Archive 自动上传**：接入后必须提示用户**完全退出 Xcode 重开**，或直接在 Xcode `Edit Scheme → Archive → + → New Run Script Phase` 手动添加 Post-actions（手动加的一定生效）。
+## 核心定位
+Xcode Archive → 蒲公英(Pgyer) 自动上传**引擎**；多宿主以 submodule 共享，凭证/配置按宿主分离（引擎目录内**禁止**出现密钥/绝对路径/真实 Bundle ID）。事实来源 = `STATUS.md`（冲突以它为准，README 非事实来源）。
+
+## Xcode 接线坑（宿主侧，高频踩坑）
+- 外部脚本改 `*.xcscheme` 注入 Archive PostActions，Xcode **不热加载**，须完全退出重开才生效 → 用户常因"没重开"误以为脚本不跑（实则 scheme 未加载、无日志）。
+- **推荐 AI/CI 走 CLI 入口** `archive_upload.sh --target "测试版本"`（自 xcodebuild archive + 上传，零 GUI 依赖）。
+- XcodeGen 工程（如 xiyuWebBrowser）优先用 **Build Phase `runOnlyWhenInstalling: true`** 调 `pgy_upload.sh`；须项目专属包装脚本预置 `--workspace/--scheme/--config`（引擎默认 `--scheme Runner`）。**勿盲目 `xcodegen generate`**：会清空 `DEVELOPMENT_TEAM`、改写 `LD_RUNPATH_SEARCH_PATHS` → 改 pbxproj 中那段 `shellScript` 即可。
 
 ## 诊断 SOP
-- 引擎/Post-actions 是否通，看 `$TMPDIR/pgy_upload_*.log`。脚本一旦启动必写日志；无日志=脚本没启动（多半是 scheme 未加载/未重开 Xcode）。
-- 日志归属靠 **IPA 名 / Bundle ID** 区分：导出 `xiyu_scoreboard.ipa` 是 Scoreboard，导出 `xiyu_todolist.ipa` 是 todo_list。**勿混淆**（曾因混淆浪费一轮排查）。
+- 脚本一旦启动必写 `$TMPDIR/pgy_upload_*.log`；**无日志=脚本没启动**（多半 scheme 未加载/未重开 Xcode）。
+- 日志按 **IPA 名/Bundle ID** 区分 App（`xiyu_scoreboard.ipa`=Scoreboard，`xiyu_todolist.ipa`=todo_list），勿混淆。
 
-## 蒲公英上传约定（用户 2026-08-08 确认）
-- 同一蒲公英用户共用一对 `PGY_USER_KEY`/`PGY_API_KEY`，不同 App 靠 Bundle ID 区分。多项目（xiyuScoreboard、xiyu_todo_list）key 一致是正常的，不是配置串味。
-- 真正区分 App 的是 config 里的 `TARGET_BUNDLE_ID`（须与 pbxproj `PRODUCT_BUNDLE_IDENTIFIER` 一致）。
+## 蒲公英约定（2026-08-08 确认）
+- 同蒲公英用户共用一对 `PGY_USER_KEY`/`PGY_API_KEY`，靠 Bundle ID 区分 App；多项目 key 一致正常。
+- 区分靠 config 的 `TARGET_BUNDLE_ID`（须与 pbxproj `PRODUCT_BUNDLE_IDENTIFIER` 一致）。
 
-## 接入核对清单（避免"半套接入"）
-1. 子模块 gitlink 对齐到最新引擎 commit，且含 archive_upload.sh/link-skill.sh/skill/。
-   **验证接入完整性看索引模式**：`git ls-files -s -- <子模块路径>` 应为 `160000`——不要看磁盘目录/文件是否存在（见 L-013）。
-2. 接入 Post-actions 时同步在 SKILL.md/文档标注"需重开 Xcode"。
+## 接入核对清单（防"半套接入"）
+1. 子模块 gitlink 对齐最新引擎 commit，且含 `archive_upload.sh/link-skill.sh/skill/`。**验证完整性看索引模式** `git ls-files -s -- <path>` = `160000`，勿看磁盘目录（见下"unregistered-gitlink"）。
+2. 接 Post-actions 时同步在 SKILL.md 标注"需重开 Xcode"。
 3. `pgy_config.sh` 密钥就位、gitignored；`TARGET_BUNDLE_ID` 与 pbxproj 一致。
-4. 接入后用 CLI 入口实跑一次验证整条链路（不依赖 Xcode GUI）。
-5. 引擎仓 commit 必须先 push origin，否则他人/新克隆解析不到子模块 commit。
-   **`origin` 已于 2026-09-19 迁至公开 GitHub 仓**（`git@github.com:xiyuyanhen/archive-pgy-uploader.git`，SSH）→
-   沙箱内**仍不能 push**，但理由从「无 codeup 凭证」变为「`~/.ssh/id_ed25519` 带口令且 `ssh-agent` 无身份」，需用户本地 push（`OPEN-005`）。
-6. **原生 XcodeGen 工程（无 Runner scheme / 无共享 scheme，如 xiyuWebBrowser）接入范式**：
-   - Xcode 接线优先用 **Build Phase `runOnlyWhenInstalling: true`** 调 `pgy_upload.sh`（比 Post-actions 稳，不依赖选哪个 scheme；`$ARCHIVE_PATH` 为空时引擎多策略查找兜底）。改 `project.yml` 后需 `xcodegen generate`。
-   - 因引擎默认 `--scheme Runner`/`Runner.xcworkspace`，须加**项目专属包装脚本**（如 `archive_and_upload.sh`）预置 `--workspace *.xcodeproj --scheme <本scheme> --config pgy_config.sh`，让 AI/CLI 一条命令跑通。
-   - ~~sandbox 无法推 codeup 远程时，用**复制引擎文件**代替 submodule~~ → **已废弃**（CR-003）：复制会失去版本锚点并漂移（WebBrowser 曾因此连引擎版本都说不清）。
-     正确做法：用 `git -c protocol.file.allow=always submodule add <本地引擎路径> <路径>` 从本地路径克隆，**随后把 `.gitmodules` 与 `.git/modules/.../config` 的 url 改回远端地址**（无需网络凭证即可完成 submodule 接入）。
-    ✅ **3 个宿主已于 2026-09-20 整体迁移**（原 `OPEN-006` 已关闭）：`.gitmodules` 与 `submodule.<name>.url` 均改指
-    `https://github.com/xiyuyanhen/archive-pgy-uploader.git`（**HTTPS 而非 SSH**——公开仓克隆不需凭证，且与原 codeup 同为 HTTPS，改动最小），
-    并用 `git submodule sync -- <path>` 同步 `.git/modules/<name>/config`；gitlink 未变，宿主仅 `.gitmodules` 一处改动。
-    宿主侧提交：`xiyuScoreboard 0e69d28` / `xiyu_todo_list 7d2d3ba` / `xiyuWebBrowser 05ee675`（**均未 push**）。
-    **验收方式**：全新克隆宿主 + `git submodule update --init`（见 L-015，`--no-checkout` 需先 `git read-tree HEAD`）。
-   - `xcodegen generate` **不要盲目执行**：本机实测会清空 `DEVELOPMENT_TEAM` 并改写 `LD_RUNPATH_SEARCH_PATHS`（pbxproj 与 project.yml 早已不同步，见 L-008）→ 改为就地替换 pbxproj 中那一段 `shellScript`。
-7. **子模块登记必须「两件齐全」**：`.gitmodules` **和** gitlink（索引模式 `160000`）都在 HEAD。
-   只提交 `.gitmodules` 会得到 `unregistered-gitlink`——本地看不出来，新克隆**静默**缺少该子模块（L-013）。
-   用 `sync-hosts.sh --check` 体检（该状态会被列出），`--apply` 可自动补登（v1.3.0 起）。
+4. 接后用 CLI 入口实跑验证整条链路。
+5. **子模块登记须「.gitmodules + gitlink(160000)」两件齐全**；只交 `.gitmodules` 得 `unregistered-gitlink`——本地正常、新克隆**静默**缺子模块（`git submodule update --init` 退出码 0 不报错也不检出）。用 `sync-hosts.sh --check` 体检、`--apply` 可补登（v1.3.0 起，仅真 submodule checkout 生效）。
 
-## 治理约定（2026-09-19 起，v1.0.0）
-**动手前必读顺序**：`AGENTS.md` → `STATUS.md`（唯一事实来源）→ `experience/LESSONS.md` → `changelog/CHANGELOG.md`。
-冲突时以 `STATUS.md` 为准（README 不是事实来源）。
+## 共享与同步机制（v1.1.0/v1.2.0/v1.3.0）
+- 共享机制统一 **submodule**（弃用文件复制——复制会失版本锚点并漂移）。三宿主：xiyuScoreboard / xiyu_todo_list（路径 `ios/Scripts/archive-pgy-uploader`）、xiyuWebBrowser（路径 `pgy-archive-uploader`，宿主根）。
+- 工程不变量：引擎目录禁密钥；凭证/控制文件放引擎外兄弟目录（`*-archive-pgy-config/`）。项目专属包装脚本放宿主根（勿放引擎内，会被 submodule 覆盖）。
+- **本机多宿主同步**：`bash sync-hosts.sh`（默认 `--check`；`--apply` 更新各宿主 gitlink 并**仅本机 commit、不 push**）。名单 `.local/hosts.json`（gitignored）。
+- **同步目标 = 发布标签**（v1.2.0 起，默认 `--target release`）：跟最新 `v*` 标签，非每个 HEAD。**纯文档/记忆提交不再惊动宿主 pin**（v1.1.0 痛点已解）。
+  - 发布主路径：`bash sync-hosts.sh --tag vX.Y.Z --apply`（打标签+推宿主一条命令）；`--tag` 护栏：格式/工作区干净/标签不存在/与 `STATUS.md project_version` 一致。
+  - `ahead-of-target`（宿主 pin 是标签后代）= 良性，默认不动，回落需 `--allow-downgrade`。
+  - 钩子只能兜底（git 无 post-tag，`post-commit` 常规不触发）→ 别指望钩子完成发布同步。
+- 远端 URL 已于 2026-09-20 整体迁 **HTTPS** `https://github.com/xiyuyanhen/archive-pgy-uploader.git`（公开仓克隆免凭证），gitlink 未变、宿主仅 `.gitmodules` 改动。
 
-- 任何修改走 `STATUS.md` §8：READ → ASSESS → CALIBRATE → IMPLEMENT → UPDATE → VERSION。
-- 改行为 → 同步 `STATUS.md` + 在 `changelog/CHANGES.md` **顶部**追加 `CR-NNN`（含前后差异/影响范围/兼容性/验证方式）。
-- **只有影响宿主调用行为**（参数/默认值/输出 JSON 字段/退出码/生成物路径）才升版本 + 建 `changelog/vX.Y.Z.md`
-  **+ 打发布标签**（`sync-hosts.sh --tag vX.Y.Z`，v1.2.0 起版本号与标签绑定）；纯文档/错别字记 CR 标「无版本变更」、**不打标签**。
-- 新问题在 `STATUS.md` §7 分配 `OPEN-NNN`（frontmatter `known_issues` 须同步）；经验追加 `experience/LESSONS.md`（`L-NNN`，只追加）+ `execution-log.json`。
-- 追加式文档插入新条目时，锚点取**新条目自身正文**并在其前插入（等价「A→A+B」），**绝不用下一条目标题当锚点**，否则会静默吞掉该标题。
-- `STATUS.md` 关键约束：`jq` 是硬依赖（缺失 exit 1）；Post-actions 入口只收 `--config/--archive`，更新说明恒取 JSON `updateDes`；`--notes` 只在 CLI 入口生效。
-- 尚未补的文档债：`OPEN-003`（jq 未登记进 README/SKILL.md 前置条件）、`OPEN-004`（README 文件树缺 `archive_upload.sh`/`link-skill.sh`/`skill/`）。
-  → **已在 v1.1.0 关闭**（README / SKILL.md 补 jq；README 文件树补全）。
+## 治理约定（v1.0.0 起）
+- 动手顺序：`AGENTS.md` → `STATUS.md` → `experience/LESSONS.md` → `changelog/CHANGELOG.md`。
+- 变更走 `STATUS.md` §8：READ→ASSESS→CALIBRATE→IMPLEMENT→UPDATE→VERSION。改行为 → 同步 `STATUS.md` + 顶部追加 `CR-NNN`（`changelog/CHANGES.md`）。
+- **仅影响宿主调用行为**（参数/默认值/JSON 字段/退出码/产物路径）才升版本 + 建 `changelog/vX.Y.Z.md` + 打标签（`sync-hosts.sh --tag`）；纯文档/错别字记 CR 标「无版本变更」、**不打标签**。
+- 新问题分配 `OPEN-NNN`；经验追加 `L-NNN`（只追加）+ `execution-log.json`。
+- 文档插入新条目锚点取**自身正文**（A→A+B），勿用下一目标题当锚点（会静默吞标题）。
+- `STATUS.md` 关键约束：`jq` 硬依赖（缺失 exit 1）；Post-actions 入口只收 `--config/--archive`、更新说明恒取 JSON `updateDes`；`--notes` 仅 CLI 入口生效。
 
-## 多项目共享方式与同步机制（2026-09-19 起，v1.1.0 / v1.2.0 / v1.3.0）
+## shell 脚本约定（本仓 `*.sh`）
+- 变量后紧跟全角/CJK 字符写 `${VAR}`：bash ≥5.2 变量名支持多字节 → `"$V）"` 被当变量名（值空+字节错位）；bash 3.2.57 反正常（L-011）。
+- 双解释器验证：`./x.sh` 走 `/bin/bash` 3.2.57，`bash x.sh` 走 PATH 首位（本机 5.3.15），语法行为都跑。
+- `set -euo pipefail` 下慎用 `工具 | grep -q`/`| head -1`（读端早退→写端 SIGPIPE 141→条件反向判假，L-009）。
+- **TSV 进程内通道所有列必须非空**（空写 `-`）：tab 是 IFS 空白，`read` 折叠连续分隔符，而 `jq split("\t")`/`awk -F'\t'` 保留空字段 → 两套解析器结果不同（L-012）。
+- `read` 单独测：遇 EOF 清空目标变量（L-006）、IFS 空白折叠（L-012）。
+- **判定性命令禁止 `2>/dev/null`**（L-014）：会把"命令失败"伪装成"空结果"。`rc=0 且空`=确实没有；`rc≠0`=无法判定。仅"失败有明确无害默认值"处可用（如 `rev-parse --quiet x 2>/dev/null || true`）。
 
-- **共享机制统一为 submodule**（不再有文件复制）。三个宿主：`xiyuScoreboard` / `xiyu_todo_list`（路径 `ios/Scripts/archive-pgy-uploader`）、`xiyuWebBrowser`（路径 `pgy-archive-uploader`，宿主根）。
-- **工程不变量：引擎目录内不得出现密钥**。凭证与控制文件必须放**引擎目录之外**的兄弟目录（命名约定 `*-archive-pgy-config/`）。通用入口默认按 `<宿主>/ios/Scripts/archive-pgy-config/pgy_config.sh` 探测；非此结构（如 XcodeGen 工程）必须显式传 `--config`。
-- **项目专属包装脚本不得放在引擎目录内**（会被 submodule 覆盖）：放宿主根，内部用 `ENGINE_DIR` / `<PROJ>_CONFIG` 变量转发。
-- **本机多宿主跟随同步**：`bash sync-hosts.sh`（默认 `--check` 只读体检，退出码 0=一致 / 2=有落后、半套接入或需人工介入 / 1=出错）→ `--apply` 更新各宿主 gitlink 并**只在宿主侧本地 commit**（不 push）；名单 `.local/hosts.json`（gitignored，本机私有）。
-- **`--apply` 处理两类状态**（v1.3.0 起）：`outdated`（更新 gitlink）与 `unregistered-gitlink`（补登 gitlink）。
-  其余状态（`uncommitted-gitlink` / `diverged` / `unknown-engine-commit` / `not-a-submodule` / `not-a-repo` / `missing`）
-  一律只提示、不自动动 —— `uncommitted-gitlink`（人已 `git add`、只差 commit）**刻意不自动提交**（可能是人工编辑中间态）。
-- **`unregistered-gitlink`（半套接入）**：`.gitmodules` 已入库但 gitlink 未登记。危害是**静默**的——
-  新克隆 `git submodule update --init` **退出码 0、不报错、也不检出**，子模块目录根本不出现，直到构建才发现引擎缺失。
-  判断接入完整性**看索引模式是否 `160000`**，不要看磁盘目录/文件是否存在（见 L-013）。
-  自动补登仅对「真子模块 checkout」（git dir 在宿主 `.git/modules/` 下）生效，vendored 副本不误补登。
-- **同步目标 = 发布标签（v1.2.0 起，默认 `--target release`）**：跟**最新 `v*` 标签**，不是每个 HEAD。
-  - **发布主路径**：`bash sync-hosts.sh --tag vX.Y.Z --apply`（打标签 + 推宿主，一条命令）。
-  - `--tag` 护栏：格式 `vX.Y.Z`、工作区干净、标签不存在、**与 `STATUS.md` `project_version` 一致**（不一致即拒绝）。
-    补打历史标签必须用原生 `git tag -a <tag> <commit>`（`--tag` 只认 HEAD 且过不了版本护栏）。
-  - 逃生口：`--target local`（本机 HEAD，开发期）/ `--target origin`（远端分支，交接期）；`--from-origin` 是 origin 的别名。
-  - **无标签时直接报错**，不静默退回 HEAD（这是刻意的）。
-  - `ahead-of-target`（宿主 pin 是标签的后代）= **良性**：不计入 attention、`--check` 不返回 2、默认不动，回落需 `--allow-downgrade`。
-  - 意图：**纯文档 / 记忆提交不再让三个宿主重新 pin**（v1.1.0 时代每个提交都会，甚至为规避而不敢提交记忆）。判据见 `STATUS.md` §8.4。
-  - `v1.0.0` **无标签**（按 §1 是治理基线快照、非发布版本）；`v1.1.0` 是事后补打的第一个发布标签。
-- **钩子只能当兜底**：git 无 `post-tag`，常规顺序「先 commit 后 tag」下 `post-commit` 永不触发 → `--auto` 改为「仅 HEAD 正好是发布标签时才 apply」。别指望钩子完成发布同步。
-- **push 一律由用户主导**（本机沙箱无可用非交互密钥身份，见 `OPEN-005`）。**标签也必须 push**，否则他人 / 新克隆看不到 release 目标。
-  - 换成**公开** GitHub 仓后的好处：标签/分支状态**事后可由沙箱匿名核实**（`git ls-remote https://github.com/xiyuyanhen/archive-pgy-uploader` → `rc=0`），不再只能依赖用户回报。
-    **已兑现（2026-09-20 核实）**：`master`=`98eef5e`、`v1.1.0`/`v1.2.0`/`v1.3.0` 三标签齐备、`v1.3.0^{}`=`dd06073`（与 `STATUS.md` §1 一致）。
-  - **代价**：`origin` 是 SSH 时 `git fetch origin` **只读也用不了**（SSH 认证对读写都要）→ 需用匿名 HTTPS 旁路：
-    `git fetch https://github.com/xiyuyanhen/archive-pgy-uploader.git '+refs/heads/*:refs/remotes/origin/*'` + `git symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/master`。
-- 评估结论（勿反复推翻）：**软链共享只适合「暴露层」**（如 `link-skill.sh` 注册技能），不适合承载引擎共享——会让所有宿主共享同一工作区，失去版本锚点与并行版本能力，且 `rm -rf <link>/` 会穿透删中央实体。
+## 远端状态可核实性（CR-008/009 校准）
+- **公开远端可匿名核实**：`git ls-remote https://github.com/xiyuyanhen/archive-pgy-uploader` → `rc=0` + 真实 SHA（无需凭证）。**私有远端不能**（需凭证，沙箱无通道，HTTP 401 非网络问题）。
+- **push 能否直推取决于 `ssh-agent` 身份**（非固定）：2026-09-20 前无身份须用户本地 push；**2026-09-20 起实测 `id_ed25519` 已加载**，`git push origin master` 成功。**标签也必须 push**。
+- 本机全局 `url.*.insteadOf` 同时改写 fetch/push（`https://github.com/`→镜像）；判远端实际地址用 `git remote get-url --push <remote>`，勿只看 `git remote -v` 字面值。
+- 分支状态可本地反推（`git push` 更新远程跟踪引用）；**标签状态不可**（push 标签不产生本地引用）→ 只能查远端。
+- 会随时间变化的事实（推送状态/远端引用）写入记忆**必须带核实方式与时间点**。
 
-## shell 脚本约定（本仓所有 `*.sh` 必须遵守）
-
-- **变量后紧跟全角/CJK 字符一律写 `${VAR}`**：根因是 **bash ≥ 5.2 的变量名解析支持多字节字符**（`"$V）"` 会被当成一个变量名 → 值展开为空 + 字节错位）。**bash 3.2.57 反而正常**（曾误记为「3.2 吞变量名」，已订正为 L-011）。
-- **双解释器验证**：macOS 上 `./x.sh` 走 shebang `/bin/bash`（3.2.57），`bash x.sh` 走 PATH 首位（本机 `/opt/homebrew/bin/bash` 5.3.15）。语法与关键行为**两个都要跑**，只测一个不算通过。
-- 静态检查（排除注释）：
-  `python3 -c "import re,pathlib;pat=re.compile(r'\\\$([A-Za-z_][A-Za-z0-9_]*)(?=[^\x00-\x7f])');[print(f'{f}:{i}') for f in ['sync-hosts.sh','link-skill.sh','archive_upload.sh','pgy_upload.sh'] for i,l in enumerate(pathlib.Path(f).read_text().splitlines(),1) if not l.lstrip().startswith('#') and pat.search(l)]"`
-- `set -euo pipefail` 下慎用 `工具 | grep -q` / `| head -1`（读端提前退出 → 写端 SIGPIPE 141 → 条件反向判假），见 L-009。
-- **TSV 作进程内数据通道时，所有列必须非空**（空值写占位符 `-`）：tab 属 **IFS 空白字符**，bash 的 `read`
-  会把连续分隔符**折叠成一个**（`:` 这类非空白分隔符才保留空字段），空列会让其后整行左移；
-  而 `jq` 的 `split("\t")` 与 `awk -F'\t'` **都保留**空字段 → 同一份数据两套解析器结果不同（见 L-012）。
-- **涉及 `read` 的代码要单独测**：`read` 的两个反直觉行为已坑过两次 —— 遇 EOF 清空目标变量（L-006）、
-  IFS 空白折叠连续分隔符（L-012）。
-- **判定性命令禁止 `2>/dev/null`**（L-014）：`2>/dev/null` 会把**命令失败**伪装成**空结果**。
-  「空输出」有两种含义，必须用退出码区分：`rc=0 且空` = 确实没有；`rc≠0` = **无法判定**。
-  `2>/dev/null` 只允许用在「失败有明确无害默认值」处（如 `rev-parse --quiet x 2>/dev/null || true`）。
-
-## 远端状态的可核实性（2026-09-19 校准，CR-008 + CR-009 收窄）
-- **本机沙箱无法核实「私有」远端的状态**（CR-009 订正了 CR-008 的「任何远端」过度概括）：
-  `ls-remote` / `push` / 私有 `clone` 都需要凭证，而 sandbox 里 `credential.helper=osxkeychain`
-  无法解锁、也没有交互终端 → 报错形态是
-  `fatal: could not read Username for 'https://codeup.aliyun.com': Device not configured`（退出码 128）。
-  私有远端实测 **HTTP 401**（服务可达、拒绝授权）——**别把 401 当成「网络不通」**，该查凭证而不是查网络。
-- **公开远端可以匿名核实**：`git ls-remote https://github.com/git/git 'refs/tags/v2.43.0'`
-  → `rc=0` + 真实 tag SHA（无需凭证，直连与经镜像一致）。
-  → 所以「换成 GitHub 远端能否查标签」的答案是：**公开仓能、私有仓不能**（沙箱无 GitHub 凭证通道：
-  `gh` 未装、无 `GITHUB_TOKEN`/`GH_TOKEN`/`GIT_TOKEN`/`GITHUB_PAT`、无 `~/.config/gh/hosts.yml`）。
-- **判据活样例**：`rc=0 且输出为空` = 确实没有；`rc≠0`（哪怕输出为空）= **无法判定**（L-014）。
-- **本机全局 `url.*.insteadOf` 同时改写 fetch 与 push**（无独立 `pushInsteadOf` 时）：
-  `https://github.com/` → `https://ghfast.top/https://github.com/`，即**推送凭证会经第三方加速镜像**。
-  判断远端地址必须用 `git remote get-url --push <remote>` 看**实际生效** URL，不能只看 `git remote -v` 字面值。
-  （另有 `url.file:///tmp/SDWebImage.insteadof https://github.com/SDWebImage/SDWebImage.git`，而 `/tmp/SDWebImage` 不存在 → 该库拉取异常时先查此规则。）
-- **分支状态可本地反推，标签状态不可**：
-  - `git push` 会更新远程跟踪引用 → 分支可用 `git rev-list --left-right --count origin/<b>...HEAD`
-    与 `git reflog show origin/<b>`（`update by push`）本地判断。
-  - **push 标签不产生任何本地引用** → 「标签推没推」只能查远端。
-- **换远端地址的连带影响**：`--target origin` 走 `symbolic-ref refs/remotes/origin/HEAD`、缺失回落 `origin/master`
-  （`sync-hosts.sh:422-423`）→ 换 URL 后未 `git fetch` 前，`origin/master` 是**旧远端**的陈旧值，脚本不崩但会给**过期目标**。
-- 这类会随时间变化的事实（推送状态、远端引用）写进记忆时**必须带核实方式与时间点**，否则很快变成误导。
-
-## 公开仓内容约定（使用者 2026-09-20 确认）
-- 本仓为**公开** GitHub 仓。`.workbuddy/memory/` 与 `experience/execution-log.json` 中的**内部项目名属测试项目**，
-  用户确认**可继续公开**（跟踪范围不变）。
-- **后续约定：不再提交其它隐私信息**（真实客户名/未公开业务、凭证、个人身份信息、内网地址等）。
-  新增内容前的自检：这份内容愿意被任何人永久读到吗？
+## 公开仓内容约定（2026-09-20 确认）
+- 本仓公开 GitHub。`.workbuddy/memory/` 与 `execution-log.json` 内**内部项目名属测试项目**，用户确认可继续公开。
+- 后续约定：**不再提交**其他隐私（真实客户名/未公开业务、凭证、个人身份信息、内网地址）。新增内容前自检：愿被任何人永久读到吗？
